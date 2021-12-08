@@ -10,3 +10,4 @@
 /.psa*
 /.spago
 /.spago2nix
+/.pre-commit-config.yaml
