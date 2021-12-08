@@ -102,7 +102,7 @@ extendResult
 extendResult f = overForm $ extend $ f <<< Form
 
 mapEither
-  :: forall ctx e a b . (a -> Either e b) -> Form ctx e a -> Form ctx e b
+  :: forall ctx e a b. (a -> Either e b) -> Form ctx e a -> Form ctx e b
 mapEither f = extendResult $ either Error Ok <<< f <=< extractResult
 
 setContext :: forall ctx e a. ctx -> Form ctx e a -> Form ctx e a

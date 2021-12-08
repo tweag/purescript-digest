@@ -24,7 +24,7 @@ data Required a = Missing | Invalid a
 
 instance functorRequired :: Functor Required where
   map fn (Invalid x) = Invalid (fn x)
-  map _  _        = Missing
+  map _ _ = Missing
 
 instance compactableRequired :: Compactable Required where
   compact Missing = Missing
@@ -32,9 +32,8 @@ instance compactableRequired :: Compactable Required where
   compact (Invalid (Just a)) = Invalid a
   separate Missing = { left: Missing, right: Missing }
   separate (Invalid e) = case e of
-    Left l  -> { left: Invalid l, right: Missing }
+    Left l -> { left: Invalid l, right: Missing }
     Right r -> { left: Missing, right: Invalid r }
-
 
 instance filterableRequired :: Filterable Required where
   partitionMap _ Missing = { left: Missing, right: Missing }
@@ -47,7 +46,8 @@ instance filterableRequired :: Filterable Required where
 
 instance witherableRequired :: Witherable Required where
   wilt _ Missing = pure { left: Missing, right: Missing }
-  wilt p (Invalid x) = map convert (p x) where
+  wilt p (Invalid x) = map convert (p x)
+    where
     convert (Left l) = { left: Invalid l, right: Missing }
     convert (Right r) = { left: Missing, right: Invalid r }
 
@@ -58,29 +58,29 @@ instance witherableRequired :: Witherable Required where
     convert (Just a) = Invalid a
 
 instance foldableRequired :: Foldable Required where
-  foldr _ z Missing  = z
+  foldr _ z Missing = z
   foldr f z (Invalid x) = x `f` z
-  foldl _ z Missing  = z
+  foldl _ z Missing = z
   foldl f z (Invalid x) = z `f` x
-  foldMap _ Missing  = mempty
+  foldMap _ Missing = mempty
   foldMap f (Invalid x) = f x
 
 instance traversableRequired :: Traversable Required where
-  traverse _ Missing  = pure Missing
+  traverse _ Missing = pure Missing
   traverse f (Invalid x) = Invalid <$> f x
-  sequence Missing  = pure Missing
+  sequence Missing = pure Missing
   sequence (Invalid x) = Invalid <$> x
 
 instance applyRequired :: Apply Required where
   apply (Invalid fn) x = fn <$> x
-  apply Missing   _ = Missing
+  apply Missing _ = Missing
 
 instance applicativeRequired :: Applicative Required where
   pure = Invalid
 
 instance altRequired :: Alt Required where
   alt Missing r = r
-  alt l       _ = l
+  alt l _ = l
 
 instance plusRequired :: Plus Required where
   empty = Missing
@@ -89,13 +89,13 @@ instance alternativeRequired :: Alternative Required
 
 instance bindRequired :: Bind Required where
   bind (Invalid x) k = k x
-  bind Missing  _ = Missing
+  bind Missing _ = Missing
 
 instance monadRequired :: Monad Required
 
 instance extendRequired :: Extend Required where
-  extend _ Missing  = Missing
-  extend f x        = Invalid (f x)
+  extend _ Missing = Missing
+  extend f x = Invalid (f x)
 
 instance invariantRequired :: Invariant Required where
   imap = imapF
@@ -110,11 +110,13 @@ instance monoidRequired :: Semigroup a => Monoid (Required a) where
 
 derive instance eqRequired :: Eq a => Eq (Required a)
 
-instance eq1Required :: Eq1 Required where eq1 = eq
+instance eq1Required :: Eq1 Required where
+  eq1 = eq
 
 derive instance ordRequired :: Ord a => Ord (Required a)
 
-instance ord1Required :: Ord1 Required where compare1 = compare
+instance ord1Required :: Ord1 Required where
+  compare1 = compare
 
 instance boundedRequired :: Bounded a => Bounded (Required a) where
   top = Invalid top
@@ -122,7 +124,7 @@ instance boundedRequired :: Bounded a => Bounded (Required a) where
 
 instance showRequired :: Show a => Show (Required a) where
   show (Invalid x) = "(Invalid " <> show x <> ")"
-  show Missing  = "Missing"
+  show Missing = "Missing"
 
 derive instance genericRequired :: Generic (Required a) _
 
