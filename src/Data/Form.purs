@@ -93,7 +93,7 @@ instance eqForm :: (Eq ctx, Eq e, Eq a) => Eq (Form ctx e a) where
     where
     evalStore p s = Tuple (p s) s
 
-class IsForm f ctx e a | f -> ctx where
+class IsForm f ctx e a | f -> ctx e a where
   toForm :: f e a -> Form ctx e a
   fromForm :: Form ctx e a -> f e a
 

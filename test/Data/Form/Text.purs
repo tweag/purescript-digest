@@ -4,7 +4,7 @@ import Prelude
 
 import Data.Form.Text (TextContext)
 import Effect.Class (liftEffect)
-import Test.Data.Form (checkForm, checkProductForm)
+import Test.Data.Form (checkCoproductForm, checkForm, checkProductForm)
 import Test.QuickCheck.Laws.Data (checkEq, checkOrd)
 import Test.Spec (Spec, describe, it)
 import Type.Proxy (Proxy(..))
@@ -14,6 +14,13 @@ spec = do
   describe "TextForm" do
     checkForm (Proxy :: _ TextContext)
     checkProductForm
+      (Proxy :: _ TextContext)
+      (Proxy :: _ TextContext)
+      (Proxy :: _ Int)
+      (Proxy :: _ Int)
+      (Proxy :: _ Int)
+      (Proxy :: _ Int)
+    checkCoproductForm
       (Proxy :: _ TextContext)
       (Proxy :: _ TextContext)
       (Proxy :: _ Int)
