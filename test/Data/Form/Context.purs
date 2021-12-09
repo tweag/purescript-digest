@@ -5,6 +5,7 @@ import Prelude
 import Control.Monad.Gen (frequency, resize, sized)
 import Data.Form.Context (class FormContext, blank, current, initial, load, output, update)
 import Data.Int (toNumber)
+import Data.Newtype (class Newtype)
 import Data.NonEmpty ((:|))
 import Data.Tuple (Tuple(..))
 import Test.QuickCheck (class Arbitrary, arbitrary, (===))
@@ -15,9 +16,11 @@ import Type.Proxy (Proxy)
 
 newtype ArbitraryFormContext ctx = AFC ctx
 
+derive instance newtypeAFC :: Newtype (ArbitraryFormContext ctx) _
 derive instance eqAFC :: Eq ctx => Eq (ArbitraryFormContext ctx)
 derive instance ordAFC :: Ord ctx => Ord (ArbitraryFormContext ctx)
 derive newtype instance showAFC :: Show ctx => Show (ArbitraryFormContext ctx)
+
 instance fromContextAFC ::
   FormContext ctx i o =>
   FormContext (ArbitraryFormContext ctx) i o where

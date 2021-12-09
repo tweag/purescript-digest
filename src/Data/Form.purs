@@ -7,10 +7,12 @@ module Data.Form
   , form'
   , imapContext
   , mapEither
+  , mkForm
   , overContext
   , peekResult
   , peeksResult
   , required
+  , runForm
   , setContext
   , viewContext
   ) where
@@ -62,7 +64,7 @@ instance bifoldableForm :: Bifoldable (Form ctx) where
   bifoldMap f g = bifoldMap f g <<< extractResult
 
 instance eqForm :: (Eq ctx, Eq e, Eq a) => Eq (Form ctx e a) where
-  eq = on eq $ uncurry evalStore <<< runStore <<< unForm
+  eq = on eq $ uncurry evalStore <<< runForm
     where
     evalStore p s = Tuple (p s) s
 
@@ -70,12 +72,20 @@ instance eqForm :: (Eq ctx, Eq e, Eq a) => Eq (Form ctx e a) where
 -- Constructors
 -------------------------------------------------------------------------------
 
+mkForm
+  :: forall ctx i o e a
+   . FormContext ctx i o
+  => ctx
+  -> (o -> Result e a)
+  -> Form ctx e a
+mkForm ctx validate = Form $ store (validate <<< output) ctx
+
 form
   :: forall ctx i o e a
    . FormContext ctx i o
   => (o -> Result e a)
   -> Form ctx e a
-form validate = Form $ store (validate <<< output) blank
+form = mkForm blank
 
 form' :: forall ctx i o e. FormContext ctx i o => Form ctx e o
 form' = form Ok
@@ -126,6 +136,9 @@ required = mapEither (note Missing) <<< lmap Invalid
 -------------------------------------------------------------------------------
 -- Eliminators
 -------------------------------------------------------------------------------
+
+runForm :: forall ctx e a. Form ctx e a -> Tuple (ctx -> Result e a) ctx
+runForm = runStore <<< unForm
 
 viewContext :: forall ctx e a. Form ctx e a -> ctx
 viewContext = pos <<< unForm

@@ -5,6 +5,7 @@
   , "control"
   , "effect"
   , "either"
+  , "enums"
   , "filterable"
   , "foldable-traversable"
   , "gen"

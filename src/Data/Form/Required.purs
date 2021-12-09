@@ -8,6 +8,8 @@ import Control.Extend (class Extend)
 import Control.Plus (class Plus)
 import Data.Compactable (class Compactable, compact)
 import Data.Either (Either(..))
+import Data.Enum (class BoundedEnum, class Enum)
+import Data.Enum.Generic (genericCardinality, genericFromEnum, genericPred, genericSucc, genericToEnum)
 import Data.Eq (class Eq1)
 import Data.Filterable (class Filterable, filterDefault, partitionDefault)
 import Data.Foldable (class Foldable)
@@ -121,6 +123,15 @@ instance ord1Required :: Ord1 Required where
 instance boundedRequired :: Bounded a => Bounded (Required a) where
   top = Invalid top
   bottom = Missing
+
+instance enumRequired :: (Bounded a, Enum a) => Enum (Required a) where
+  succ = genericSucc
+  pred = genericPred
+
+instance boundedEnumRequired :: BoundedEnum a => BoundedEnum (Required a) where
+  cardinality = genericCardinality
+  toEnum = genericToEnum
+  fromEnum = genericFromEnum
 
 instance showRequired :: Show a => Show (Required a) where
   show (Invalid x) = "(Invalid " <> show x <> ")"
