@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Alt (class Alt)
 import Control.Extend (class Extend)
+import Control.Monad.Gen (frequency)
 import Data.Bifoldable (class Bifoldable)
 import Data.Bifunctor (class Bifunctor)
 import Data.Bitraversable (class Bitraversable)
@@ -13,9 +14,13 @@ import Data.Foldable (class Foldable)
 import Data.Functor.Invariant (class Invariant, imapF)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), maybe)
+import Data.NonEmpty ((:|))
 import Data.Ord (class Ord1)
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable)
+import Data.Tuple (Tuple(..))
+import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary, coarbitrary)
+import Test.QuickCheck.Gen (perturbGen)
 
 -- | The `Result` type is used to represent the result of a form validation. It
 -- | is isomorphic to `Result (Maybe e) a` where `Left Nothing` corresponds to
@@ -115,6 +120,28 @@ instance boundedResult :: (Bounded e, Bounded a) => Bounded (Result e a) where
 instance semigroupResult :: (Semigroup a) => Semigroup (Result e a) where
   append x y = append <$> x <*> y
 
+instance coarbitraryResult ::
+  ( Coarbitrary e
+  , Coarbitrary a
+  ) =>
+  Coarbitrary (Result e a) where
+  coarbitrary Unevaluated = perturbGen 1.0
+  coarbitrary (Error e) = perturbGen 2.0 <<< coarbitrary e
+  coarbitrary (Ok a) = perturbGen 3.0 <<< coarbitrary a
+
+instance arbitraryResult ::
+  ( Arbitrary e
+  , Arbitrary a
+  ) =>
+  Arbitrary (Result e a) where
+  arbitrary =
+    frequency
+      $ Tuple 0.1 (pure Unevaluated)
+          :|
+            [ Tuple 0.4 (Error <$> arbitrary)
+            , Tuple 0.5 (Ok <$> arbitrary)
+            ]
+
 result :: forall e a b. b -> (e -> b) -> (a -> b) -> Result e a -> b
 result b _ _ Unevaluated = b
 result _ f _ (Error e) = f e
@@ -171,3 +198,9 @@ fromEither = either (maybe Unevaluated Error) Ok
 -- | Turns a `Result` into an `Either`.
 toEither :: forall e. Result e ~> Either (Maybe e)
 toEither = result (Left Nothing) (Left <<< Just) Right
+
+-- | Ignore any errors in the first result by converting them to an
+-- | `Unevaluated`.
+ignore :: forall e e' a. Result e a -> Result e' a
+ignore (Ok a) = Ok a
+ignore _ = Unevaluated
