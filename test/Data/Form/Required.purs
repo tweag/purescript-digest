@@ -11,11 +11,33 @@ import Data.Form.Required (Required(..))
 import Data.NonEmpty ((:|))
 import Data.Tuple (Tuple(..))
 import Effect.Class (liftEffect)
-import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary, coarbitrary)
+import Test.QuickCheck
+  ( class Arbitrary
+  , class Coarbitrary
+  , arbitrary
+  , coarbitrary
+  )
 import Test.QuickCheck.Gen (perturbGen)
 import Test.QuickCheck.Laws (A)
-import Test.QuickCheck.Laws.Control (checkAlt, checkAlternative, checkApplicative, checkApply, checkBind, checkExtend, checkMonad, checkPlus)
-import Test.QuickCheck.Laws.Data (checkBounded, checkEq, checkFoldable, checkFunctor, checkMonoid, checkOrd, checkSemigroup)
+import Test.QuickCheck.Laws.Control
+  ( checkAlt
+  , checkAlternative
+  , checkApplicative
+  , checkApply
+  , checkBind
+  , checkExtend
+  , checkMonad
+  , checkPlus
+  )
+import Test.QuickCheck.Laws.Data
+  ( checkBounded
+  , checkEq
+  , checkFoldable
+  , checkFunctor
+  , checkMonoid
+  , checkOrd
+  , checkSemigroup
+  )
 import Test.Spec (Spec, describe, it)
 import Type.Proxy (Proxy(..), Proxy2(..))
 

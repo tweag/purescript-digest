@@ -2,11 +2,16 @@ module Test.Data.Form where
 
 import Prelude
 
-import Data.Form (class FormContext, Form, current, initial, load, update)
+import Data.Form (class FormContext, Form, current, initial, load, save, update)
 import Data.Form.Coproduct (CoproductContext)
 import Data.Form.Product (ProductContext)
 import Effect.Class (liftEffect)
-import Test.QuickCheck (class Arbitrary, class Coarbitrary, (===))
+import Test.QuickCheck
+  ( class Arbitrary
+  , class Coarbitrary
+  , class Testable
+  , (===)
+  )
 import Test.QuickCheck.Laws (A, B)
 import Test.QuickCheck.Laws.Data (checkEq, checkFoldable, checkFunctor)
 import Test.Spec (Spec, describe, it)
@@ -26,15 +31,20 @@ checkForm
   => Proxy ctx
   -> Spec Unit
 checkForm _ = do
-  describe "FormContext laws" do
+  describe "Form laws" do
+    let
+      checkLaw :: forall p. Testable p => (Form ctx A B -> p) -> _
+      checkLaw = quickCheck
     it "satisfies initial <<< load" do
-      quickCheck \(ctx :: ctx) i -> initial (load i ctx) === i
+      checkLaw \form i -> initial (load i form) === i
     it "satisfies current <<< load" do
-      quickCheck \(ctx :: ctx) i -> current (load i ctx) === i
+      checkLaw \form i -> current (load i form) === i
     it "satisfies initial <<< update" do
-      quickCheck \(ctx :: ctx) i -> initial (update i ctx) === initial ctx
+      checkLaw \form i -> initial (update i form) === initial form
     it "satisfies current <<< update" do
-      quickCheck \(ctx :: ctx) i -> current (update i ctx) === i
+      checkLaw \form i -> current (update i form) === i
+    it "satisfies save law" do
+      checkLaw \form -> initial (save form) === current form
   it "obeys the Eq laws" do
     liftEffect $ checkEq (Proxy :: _ (Form ctx A B))
   it "obeys the Functor laws" do

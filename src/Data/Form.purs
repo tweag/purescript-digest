@@ -1,9 +1,15 @@
 module Data.Form
   ( Form
   , arbitraryFormContext
+  , class ArbitraryFormContext
   , class FormContext
   , class IsForm
   , collectResults
+  , ctx_current
+  , ctx_initial
+  , ctx_load
+  , ctx_output
+  , ctx_update
   , current
   , dirty
   , extendResult
@@ -11,13 +17,16 @@ module Data.Form
   , form
   , form'
   , fromForm
+  , genBlank
   , imapContext
   , initial
   , load
+  , loadBoth
+  , loadLeft
+  , loadRight
   , mapEither
-  , mkForm
-  , output
   , overContext
+  , overInput
   , peekResult
   , peeksResult
   , required
@@ -26,15 +35,33 @@ module Data.Form
   , setContext
   , toForm
   , update
+  , updateBoth
+  , updateLeft
+  , updateRight
   , viewContext
   ) where
 
 import Prelude
 
 import Control.Comonad (extend, extract)
-import Control.Comonad.Store (Store, experiment, peek, peeks, pos, runStore, seek, seeks, store)
+import Control.Comonad.Store
+  ( Store
+  , experiment
+  , peek
+  , peeks
+  , pos
+  , runStore
+  , seek
+  , seeks
+  , store
+  )
 import Control.Monad.Gen (frequency, resize, sized)
-import Data.Bifoldable (class Bifoldable, bifoldMap, bifoldlDefault, bifoldrDefault)
+import Data.Bifoldable
+  ( class Bifoldable
+  , bifoldMap
+  , bifoldlDefault
+  , bifoldrDefault
+  )
 import Data.Bifunctor (class Bifunctor, bimap, lmap)
 import Data.Either (Either, either, hush, note)
 import Data.Filterable (class Filterable, filterMap)
@@ -48,9 +75,15 @@ import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.NonEmpty ((:|))
 import Data.Profunctor (lcmap)
-import Data.Tuple (Tuple(..), fst, uncurry)
-import Data.Tuple.Nested ((/\))
-import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary, coarbitrary)
+import Data.Profunctor.Strong ((&&&))
+import Data.Tuple (Tuple(..), curry, fst, uncurry)
+import Data.Tuple.Nested (type (/\), (/\))
+import Test.QuickCheck
+  ( class Arbitrary
+  , class Coarbitrary
+  , arbitrary
+  , coarbitrary
+  )
 import Test.QuickCheck.Gen (Gen, runGen, stateful)
 
 -------------------------------------------------------------------------------
@@ -60,11 +93,11 @@ import Test.QuickCheck.Gen (Gen, runGen, stateful)
 newtype Form ctx e a = Form (Store ctx (Result e a))
 
 class FormContext ctx i o | ctx -> i o where
-  current :: ctx -> i
-  initial :: ctx -> i
-  load :: i -> ctx -> ctx
-  output :: ctx -> o
-  update :: i -> ctx -> ctx
+  ctx_current :: ctx -> i
+  ctx_initial :: ctx -> i
+  ctx_load :: i -> ctx -> ctx
+  ctx_output :: ctx -> o
+  ctx_update :: i -> ctx -> ctx
 
 -------------------------------------------------------------------------------
 -- Instances
@@ -76,7 +109,7 @@ instance invariantForm :: Invariant (Form ctx e) where
   imap = imapF
 
 instance bifunctorForm :: Bifunctor (Form ctx) where
-  bimap f g = overForm $ map $ bimap f g
+  bimap f g = overStore $ map $ bimap f g
 
 instance foldableForm :: Foldable (Form ctx e) where
   foldr f = foldrDefault f
@@ -93,9 +126,18 @@ instance eqForm :: (Eq ctx, Eq e, Eq a) => Eq (Form ctx e a) where
     where
     evalStore p s = Tuple (p s) s
 
-class IsForm f ctx e a | f -> ctx e a where
+class IsForm f ctx e a | f -> ctx where
   toForm :: f e a -> Form ctx e a
   fromForm :: Form ctx e a -> f e a
+
+overForm
+  :: forall f f' c c' e e' a a'
+   . IsForm f c e a
+  => IsForm f' c' e' a'
+  => (Form c e a -> Form c' e' a')
+  -> f e a
+  -> f' e' a'
+overForm f = fromForm <<< f <<< toForm
 
 instance isFormForm :: IsForm (Form ctx) ctx e a where
   toForm = identity
@@ -111,27 +153,52 @@ instance formContextForm ::
   ( FormContext ctx i o
   ) =>
   FormContext (Form ctx e a) i (Result e a) where
-  current = current <<< viewContext
-  initial = initial <<< viewContext
-  load i = overContext (load i)
-  output = extractResult
-  update i = overContext (update i)
+  ctx_current = current
+  ctx_initial = initial
+  ctx_load = load
+  ctx_output = extractResult
+  ctx_update = update
+
+instance arbitraryFormContextForm ::
+  ( ArbitraryFormContext ctx i o
+  , Arbitrary i
+  , Arbitrary e
+  , Arbitrary a
+  , Coarbitrary o
+  ) =>
+  ArbitraryFormContext (Form ctx e a) i (Result e a) where
+  genBlank = genForm genBlank
+
+class FormContext ctx i o <= ArbitraryFormContext ctx i o | ctx -> i o where
+  genBlank :: Gen ctx
 
 arbitraryFormContext
   :: forall ctx i o
-   . FormContext ctx i o
+   . ArbitraryFormContext ctx i o
   => Arbitrary i
   => Gen ctx
-  -> Gen ctx
-arbitraryFormContext blank = sized go
+arbitraryFormContext = sized go
   where
   go size =
-    frequency $ 1.0 /\ blank :|
-      (Tuple nodeFreq <$> [ alter load, alter update ])
+    frequency $ 1.0 /\ genBlank :|
+      (Tuple nodeFreq <$> [ alter ctx_load, alter ctx_update ])
     where
     nodeFreq = toNumber size / 2.0
     half n = n / 2
-    alter f = f <$> arbitrary <*> resize half (arbitraryFormContext blank)
+    alter f = f <$> arbitrary <*> resize half arbitraryFormContext
+
+genForm
+  :: forall ctx i o e a
+   . FormContext ctx i o
+  => Arbitrary i
+  => Arbitrary e
+  => Arbitrary a
+  => Coarbitrary o
+  => Gen ctx
+  -> Gen (Form ctx e a)
+genForm genCtx =
+  form <$> genCtx <*> stateful \state -> pure \o ->
+    fst $ runGen (coarbitrary o arbitrary) state
 
 instance arbitraryForm ::
   ( FormContext ctx i o
@@ -142,8 +209,7 @@ instance arbitraryForm ::
   , Coarbitrary o
   ) =>
   Arbitrary (Form ctx e a) where
-  arbitrary = mkForm <$> arbitrary <*> stateful \state -> pure \o ->
-    fst $ runGen (coarbitrary o arbitrary) state
+  arbitrary = genForm arbitrary
 
 instance showForm :: (Show ctx, Show e, Show a) => Show (Form ctx e a) where
   show f =
@@ -153,104 +219,246 @@ instance showForm :: (Show ctx, Show e, Show a) => Show (Form ctx e a) where
 -- Constructors
 -------------------------------------------------------------------------------
 
-mkForm
-  :: forall ctx i o e a
+form
+  :: forall ctx f i o e a
    . FormContext ctx i o
+  => IsForm f ctx e a
   => ctx
   -> (o -> Result e a)
-  -> Form ctx e a
-mkForm ctx validate = Form $ store (validate <<< output) ctx
+  -> f e a
+form ctx validate = fromForm $ Form $ store (validate <<< ctx_output) ctx
 
-form
-  :: forall ctx i o e a
+form'
+  :: forall ctx f i o e
    . FormContext ctx i o
-  => Monoid ctx
-  => (o -> Result e a)
-  -> Form ctx e a
-form = mkForm mempty
-
-form' :: forall ctx i o e. Monoid ctx => FormContext ctx i o => Form ctx e o
-form' = form Ok
+  => IsForm f ctx e o
+  => ctx
+  -> f e o
+form' ctx = form ctx Ok
 
 -------------------------------------------------------------------------------
 -- Combinators
 -------------------------------------------------------------------------------
 
 imapContext
-  :: forall ctx ctx' e a
-   . (ctx' -> ctx)
+  :: forall f f' ctx ctx' e a
+   . IsForm f ctx e a
+  => IsForm f' ctx' e a
+  => (ctx' -> ctx)
   -> (ctx -> ctx')
-  -> Form ctx e a
-  -> Form ctx' e a
-imapContext f g = overForm (uncurry store <<< uncurry go <<< runStore)
+  -> f e a
+  -> f' e a
+imapContext f g = overStore $ uncurry store <<< uncurry go <<< runStore
   where
   go p s = Tuple (lcmap f p) $ g s
 
 extendResult
-  :: forall ctx e f a b
-   . (Form ctx e a -> Result f b)
-  -> Form ctx e a
-  -> Form ctx f b
-extendResult f = overForm $ extend $ f <<< Form
+  :: forall f ctx e e' a b
+   . IsForm f ctx e a
+  => IsForm f ctx e' b
+  => (Form ctx e a -> Result e' b)
+  -> f e a
+  -> f e' b
+extendResult f = overStore $ extend $ f <<< Form
 
 mapEither
-  :: forall ctx e a b. (a -> Either e b) -> Form ctx e a -> Form ctx e b
+  :: forall f ctx e a b
+   . IsForm f ctx e a
+  => IsForm f ctx e b
+  => (a -> Either e b)
+  -> f e a
+  -> f e b
 mapEither f = extendResult $ either Error Ok <<< f <=< extractResult
 
-setContext :: forall ctx e a. ctx -> Form ctx e a -> Form ctx e a
-setContext ctx = overForm $ seek ctx
+setContext :: forall f ctx e a. IsForm f ctx e a => ctx -> f e a -> f e a
+setContext ctx = overStore $ seek ctx
 
-overContext :: forall ctx e a. (ctx -> ctx) -> Form ctx e a -> Form ctx e a
-overContext f = overForm $ seeks f
+overContext
+  :: forall f ctx e a. IsForm f ctx e a => (ctx -> ctx) -> f e a -> f e a
+overContext f = overStore $ seeks f
 
-extractResult :: forall ctx e a. Form ctx e a -> Result e a
+extractResult :: forall f ctx e a. IsForm f ctx e a => f e a -> Result e a
 extractResult = extract <<< unForm
 
-peekResult :: forall ctx e a. ctx -> Form ctx e a -> Result e a
+peekResult :: forall f ctx e a. IsForm f ctx e a => ctx -> f e a -> Result e a
 peekResult ctx = peek ctx <<< unForm
 
-peeksResult :: forall ctx e a. (ctx -> ctx) -> Form ctx e a -> Result e a
+peeksResult
+  :: forall f ctx e a. IsForm f ctx e a => (ctx -> ctx) -> f e a -> Result e a
 peeksResult f = peeks f <<< unForm
 
-required :: forall ctx e a. Form ctx e (Maybe a) -> Form ctx (Required e) a
+required
+  :: forall f ctx e a
+   . Bifunctor f
+  => IsForm f ctx e (Maybe a)
+  => IsForm f ctx (Required e) (Maybe a)
+  => IsForm f ctx (Required e) a
+  => f e (Maybe a)
+  -> f (Required e) a
 required = mapEither (note Missing) <<< lmap Invalid
 
-save :: forall ctx i o. FormContext ctx i o => ctx -> ctx
-save ctx = load (current ctx) ctx
+current
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => f e a
+  -> i
+current = ctx_current <<< viewContext
+
+initial
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => f e a
+  -> i
+initial = ctx_initial <<< viewContext
+
+load
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => i
+  -> f e a
+  -> f e a
+load = overContext <<< ctx_load
+
+loadLeft
+  :: forall f g c1 c2 i1 i2 o e a
+   . FormContext (g c1 c2) (i1 /\ i2) o
+  => IsForm f (g c1 c2) e a
+  => Bifunctor g
+  => i1
+  -> f e a
+  -> f e a
+loadLeft i f = load (lmap (const i) $ current f) f
+
+loadRight
+  :: forall f g c i1 i2 o e a
+   . FormContext (g c) (i1 /\ i2) o
+  => IsForm f (g c) e a
+  => Functor g
+  => i2
+  -> f e a
+  -> f e a
+loadRight i f = load (map (const i) $ current f) f
+
+loadBoth
+  :: forall f g c1 c2 i1 i2 o e a
+   . FormContext (g c1 c2) (i1 /\ i2) o
+  => IsForm f (g c1 c2) e a
+  => Bifunctor g
+  => i1
+  -> i2
+  -> f e a
+  -> f e a
+loadBoth = curry load
+
+update
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => i
+  -> f e a
+  -> f e a
+update = overContext <<< ctx_update
+
+updateLeft
+  :: forall f g c1 c2 i1 i2 o e a
+   . FormContext (g c1 c2) (i1 /\ i2) o
+  => IsForm f (g c1 c2) e a
+  => Bifunctor g
+  => i1
+  -> f e a
+  -> f e a
+updateLeft i f = update (lmap (const i) $ current f) f
+
+updateRight
+  :: forall f g c i1 i2 o e a
+   . FormContext (g c) (i1 /\ i2) o
+  => IsForm f (g c) e a
+  => Functor g
+  => i2
+  -> f e a
+  -> f e a
+updateRight i f = update (map (const i) $ current f) f
+
+updateBoth
+  :: forall f g c1 c2 i1 i2 o e a
+   . FormContext (g c1 c2) (i1 /\ i2) o
+  => IsForm f (g c1 c2) e a
+  => Bifunctor g
+  => i1
+  -> i2
+  -> f e a
+  -> f e a
+updateBoth = curry update
+
+save
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => f e a
+  -> f e a
+save = uncurry load <<< (current &&& identity)
 
 -------------------------------------------------------------------------------
 -- Eliminators
 -------------------------------------------------------------------------------
 
-runForm :: forall ctx e a. Form ctx e a -> Tuple (ctx -> Result e a) ctx
+runForm
+  :: forall f ctx e a
+   . IsForm f ctx e a
+  => f e a
+  -> Tuple (ctx -> Result e a) ctx
 runForm = runStore <<< unForm
 
-viewContext :: forall ctx e a. Form ctx e a -> ctx
+viewContext :: forall ctx f e a. IsForm f ctx e a => f e a -> ctx
 viewContext = pos <<< unForm
 
 collectResults
-  :: forall f ctx e a
+  :: forall form f ctx e a
    . Functor f
   => Filterable f
+  => IsForm form ctx e a
   => (ctx -> f ctx)
-  -> Form ctx e a
+  -> form e a
   -> f a
 collectResults f =
   filterMap (hush <<< toEither) <<< experiment f <<< unForm
 
-dirty :: forall ctx i o. Eq i => FormContext ctx i o => ctx -> Boolean
-dirty ctx = initial ctx /= current ctx
+dirty
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => FormContext ctx i o
+  => Eq i
+  => f e a
+  -> Boolean
+dirty = uncurry notEq <<< (initial &&& current)
+
+overInput
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => FormContext ctx i o
+  => (i -> i)
+  -> f e a
+  -> f e a
+overInput f = uncurry update <<< (f <<< current &&& identity)
 
 -------------------------------------------------------------------------------
 -- Private helpers
 -------------------------------------------------------------------------------
 
-unForm :: forall ctx e a. Form ctx e a -> Store ctx (Result e a)
-unForm (Form s) = s
+unForm :: forall f ctx e a. IsForm f ctx e a => f e a -> Store ctx (Result e a)
+unForm f = case toForm f of
+  Form s -> s
 
-overForm
-  :: forall ctx ctx' e f a b
-   . (Store ctx (Result e a) -> Store ctx' (Result f b))
-  -> Form ctx e a
-  -> Form ctx' f b
-overForm f = Form <<< f <<< unForm
+overStore
+  :: forall f f' ctx ctx' e e' a b
+   . IsForm f ctx e a
+  => IsForm f' ctx' e' b
+  => (Store ctx (Result e a) -> Store ctx' (Result e' b))
+  -> f e a
+  -> f' e' b
+overStore f = overForm $ Form <<< f <<< unForm

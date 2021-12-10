@@ -19,7 +19,12 @@ import Data.Ord (class Ord1)
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable)
 import Data.Tuple (Tuple(..))
-import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary, coarbitrary)
+import Test.QuickCheck
+  ( class Arbitrary
+  , class Coarbitrary
+  , arbitrary
+  , coarbitrary
+  )
 import Test.QuickCheck.Gen (perturbGen)
 
 -- | The `Result` type is used to represent the result of a form validation. It

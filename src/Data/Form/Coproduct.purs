@@ -1,37 +1,43 @@
 module Data.Form.Coproduct
   ( CoproductForm(..)
-  , CoproductContext(..)
-  , choose
-  , loadChoice
-  , biimapContext
-  , lload
-  , rload
-  , biload
-  , lupdate
-  , rupdate
-  , biupdate
-  , loverContext
-  , roverContext
-  , bioverContext
-  , lsetContext
-  , rsetContext
-  , bisetContext
+  , CoproductContext
   , coproduct
+  , loadChoice
+  , overChoice
+  , updateChoice
+  , viewChoice
+  , viewInitialChoice
   ) where
 
 import Prelude
 
 import Data.Bifoldable (class Bifoldable)
-import Data.Bifunctor (class Bifunctor, bimap, lmap)
+import Data.Bifunctor (class Bifunctor, bimap)
 import Data.Either (Either(..))
 import Data.Either.Nested (type (\/))
 import Data.Foldable (class Foldable)
-import Data.Form (class FormContext, class IsForm, Form, current, extractResult, fromForm, imapContext, initial, load, mkForm, output, overContext, toForm, update, viewContext)
+import Data.Form
+  ( class FormContext
+  , class IsForm
+  , Form
+  , ctx_current
+  , ctx_initial
+  , ctx_load
+  , ctx_output
+  , ctx_update
+  , form
+  , fromForm
+  , overContext
+  , toForm
+  , viewContext
+  )
 import Data.Form.Result (Result, ignore)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
-import Data.Newtype (class Newtype, over, unwrap)
-import Data.Show.Generic (genericShow)
+import Data.Newtype (class Newtype)
+import Data.Profunctor.Strong ((&&&))
+import Data.String (joinWith)
+import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary)
 
@@ -39,27 +45,27 @@ import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary)
 -- Model
 -------------------------------------------------------------------------------
 
-data CoproductContext c1 c2 = CoproductContext Boolean Boolean c1 c2
+data CoproductContext cl cr = CoproductContext Boolean Boolean cl cr
 
-newtype CoproductForm c1 c2 e a = CoproductForm
-  (Form (CoproductContext c1 c2) e a)
+newtype CoproductForm cl cr e a = CoproductForm
+  (Form (CoproductContext cl cr) e a)
 
 -------------------------------------------------------------------------------
 -- Constructors
 -------------------------------------------------------------------------------
 
 coproduct
-  :: forall f1 f2 c1 c2 i1 i2 o1 o2 e1 e2 a b e
-   . FormContext c1 i1 o1
-  => FormContext c2 i2 o2
-  => IsForm f1 c1 e1 a
-  => IsForm f2 c2 e2 b
+  :: forall f1 f2 cl cr i1 i2 o1 o2 e1 e2 a b e
+   . FormContext cl i1 o1
+  => FormContext cr i2 o2
+  => IsForm f1 cl e1 a
+  => IsForm f2 cr e2 b
   => Boolean
   -> f1 e1 a
   -> f2 e2 b
   -> CoproductForm (f1 e1 a) (f2 e2 b) e (a \/ b)
 coproduct choice f1 f2 =
-  CoproductForm $ mkForm (CoproductContext choice choice f1 f2) validate
+  form (CoproductContext choice choice f1 f2) validate
   where
   validate (Left a) = Left <$> ignore a
   validate (Right b) = Right <$> ignore b
@@ -68,35 +74,35 @@ coproduct choice f1 f2 =
 -- Instances
 -------------------------------------------------------------------------------
 
-derive instance genericCoproductForm :: Generic (CoproductForm c1 c2 e a) _
+derive instance genericCoproductForm :: Generic (CoproductForm cl cr e a) _
 
-derive instance newtypeCoproductForm :: Newtype (CoproductForm c1 c2 e a) _
+derive instance newtypeCoproductForm :: Newtype (CoproductForm cl cr e a) _
 
 derive instance eqCoproductForm ::
-  ( Eq c1
-  , Eq c2
+  ( Eq cl
+  , Eq cr
   , Eq e
   , Eq a
   ) =>
-  Eq (CoproductForm c1 c2 e a)
+  Eq (CoproductForm cl cr e a)
 
-derive instance functorCoproductForm :: Functor (CoproductForm c1 c2 e)
+derive instance functorCoproductForm :: Functor (CoproductForm cl cr e)
 
 derive newtype instance invariantCoproductForm ::
-  Invariant (CoproductForm c1 c2 e)
+  Invariant (CoproductForm cl cr e)
 
 derive newtype instance bifunctorCoproductForm ::
-  Bifunctor (CoproductForm c1 c2)
+  Bifunctor (CoproductForm cl cr)
 
 derive newtype instance foldableCoproductForm ::
-  Foldable (CoproductForm c1 c2 e)
+  Foldable (CoproductForm cl cr e)
 
 derive newtype instance bifoldableCoproductForm ::
-  Bifoldable (CoproductForm c1 c2)
+  Bifoldable (CoproductForm cl cr)
 
 instance arbitraryNewtypeCoproductContext ::
-  ( Arbitrary c1
-  , Arbitrary c2
+  ( Arbitrary cl
+  , Arbitrary cr
   , Arbitrary i1
   , Arbitrary i2
   , Arbitrary e1
@@ -105,193 +111,104 @@ instance arbitraryNewtypeCoproductContext ::
   , Arbitrary b
   , Coarbitrary o1
   , Coarbitrary o2
-  , FormContext c1 i1 o1
-  , FormContext c2 i2 o2
-  , IsForm (f1 c1) c1 e1 a
-  , IsForm (f2 c2) c2 e2 b
+  , FormContext cl i1 o1
+  , FormContext cr i2 o2
+  , IsForm (f1 cl) cl e1 a
+  , IsForm (f2 cr) cr e2 b
   ) =>
-  Arbitrary (CoproductContext (f1 c1 e1 a) (f2 c2 e2 b)) where
+  Arbitrary (CoproductContext (f1 cl e1 a) (f2 cr e2 b)) where
   arbitrary = map (bimap fromForm fromForm)
     $ CoproductContext <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary
 
-derive instance genericCoproductContext :: Generic (CoproductContext c1 c2) _
 derive instance eqCoproductContext ::
-  ( Eq c1
-  , Eq c2
+  ( Eq cl
+  , Eq cr
   ) =>
-  Eq (CoproductContext c1 c2)
+  Eq (CoproductContext cl cr)
 
 derive instance ordCoproductContext ::
-  ( Ord c1
-  , Ord c2
+  ( Ord cl
+  , Ord cr
   ) =>
-  Ord (CoproductContext c1 c2)
+  Ord (CoproductContext cl cr)
 
-derive instance functorCoproductContext :: Functor (CoproductContext c1)
+derive instance functorCoproductContext :: Functor (CoproductContext cl)
 instance bifunctorCoproductContext :: Bifunctor CoproductContext where
-  bimap f g (CoproductContext initialChoice choice c1 c2) =
-    CoproductContext initialChoice choice (f c1) (g c2)
+  bimap f g (CoproductContext initialChoice choice cl cr) =
+    CoproductContext initialChoice choice (f cl) (g cr)
 
 instance showCoproductContext ::
-  ( Show c1
-  , Show c2
+  ( Show cl
+  , Show cr
   ) =>
-  Show (CoproductContext c1 c2) where
-  show = genericShow
+  Show (CoproductContext cl cr) where
+  show (CoproductContext initialChoice choice cl cr) =
+    ("(" <> _)
+      $ (_ <> ")")
+      $ joinWith " "
+          [ "CoproductContext"
+          , show initialChoice
+          , show choice
+          , show cl
+          , show cr
+          ]
 
 instance formContextCoproduct ::
-  ( FormContext c1 i1 o1
-  , FormContext c2 i2 o2
-  , IsForm f1 c1 e1 a
-  , IsForm f2 c2 e2 b
+  ( FormContext cl i1 o1
+  , FormContext cr i2 o2
+  , IsForm f1 cl e1 a
+  , IsForm f2 cr e2 b
   ) =>
   FormContext
     (CoproductContext (f1 e1 a) (f2 e2 b))
     (Boolean /\ i1 /\ i2)
     (Result e1 a \/ Result e2 b) where
-  current (CoproductContext _ choice f1 f2) =
-    choice /\ current (toForm f1) /\ current (toForm f2)
-  initial (CoproductContext choice _ f1 f2) =
-    choice /\ initial (toForm f1) /\ initial (toForm f2)
-  load (choice /\ i1 /\ i2) (CoproductContext _ _ f1 f2) =
+  ctx_current (CoproductContext _ choice f1 f2) =
+    choice /\ ctx_current (toForm f1) /\ ctx_current (toForm f2)
+  ctx_initial (CoproductContext choice _ f1 f2) =
+    choice /\ ctx_initial (toForm f1) /\ ctx_initial (toForm f2)
+  ctx_load (choice /\ i1 /\ i2) (CoproductContext _ _ f1 f2) =
     CoproductContext
       choice
       choice
-      (fromForm $ load i1 $ toForm f1)
-      (fromForm $ load i2 $ toForm f2)
-  output (CoproductContext _ false f1 _) = Left $ output (toForm f1)
-  output (CoproductContext _ true _ f2) = Right $ output (toForm f2)
-  update (choice /\ i1 /\ i2) (CoproductContext initialChoice _ f1 f2) =
+      (fromForm $ ctx_load i1 $ toForm f1)
+      (fromForm $ ctx_load i2 $ toForm f2)
+  ctx_output (CoproductContext _ false f1 _) = Left $ ctx_output (toForm f1)
+  ctx_output (CoproductContext _ true _ f2) = Right $ ctx_output (toForm f2)
+  ctx_update (choice /\ i1 /\ i2) (CoproductContext initialChoice _ f1 f2) =
     CoproductContext
       initialChoice
       choice
-      (fromForm $ update i1 $ toForm f1)
-      (fromForm $ update i2 $ toForm f2)
+      (fromForm $ ctx_update i1 $ toForm f1)
+      (fromForm $ ctx_update i2 $ toForm f2)
 
-instance formContextCoproductForm ::
-  ( FormContext (CoproductContext c1 c2) i o
-  ) =>
-  FormContext (CoproductForm c1 c2 e a) i (Result e a) where
-  current = current <<< viewContext <<< unwrap
-  initial = initial <<< viewContext <<< unwrap
-  load i = over CoproductForm $ overContext (load i)
-  output = extractResult <<< unwrap
-  update i = over CoproductForm $ overContext (update i)
+viewChoice :: forall cl cr e a. CoproductForm cl cr e a -> Boolean
+viewChoice = viewContext >>> \(CoproductContext _ choice _ _) -> choice
 
-lsetContext
-  :: forall c1 c2 e a. c1 -> CoproductForm c1 c2 e a -> CoproductForm c1 c2 e a
-lsetContext = loverContext <<< const
+viewInitialChoice :: forall cl cr e a. CoproductForm cl cr e a -> Boolean
+viewInitialChoice = viewContext >>> \(CoproductContext choice _ _ _) -> choice
 
-rsetContext
-  :: forall c1 c2 e a. c2 -> CoproductForm c1 c2 e a -> CoproductForm c1 c2 e a
-rsetContext = roverContext <<< const
+overChoice
+  :: forall cl cr e a
+   . (Boolean -> Boolean)
+  -> CoproductForm cl cr e a
+  -> CoproductForm cl cr e a
+overChoice f = uncurry updateChoice <<< (f <<< viewChoice &&& identity)
 
-bisetContext
-  :: forall c1 c2 e a
-   . c1
-  -> c2
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-bisetContext c1 = bioverContext (const c1) <<< const
-
-loverContext
-  :: forall c1 c2 e a
-   . (c1 -> c1)
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-loverContext = over CoproductForm <<< overContext <<< lmap
-
-roverContext
-  :: forall c1 c2 e a
-   . (c2 -> c2)
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-roverContext = over CoproductForm <<< overContext <<< map
-
-bioverContext
-  :: forall c1 c2 e a
-   . (c1 -> c1)
-  -> (c2 -> c2)
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-bioverContext f1 = over CoproductForm <<< overContext <<< bimap f1
-
-lload
-  :: forall c1 c2 i1 i2 o e a
-   . FormContext (CoproductForm c1 c2 e a) (i1 /\ i2) o
-  => i1
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-lload i f = load (lmap (const i) $ current f) f
-
-rload
-  :: forall c1 c2 i1 i2 o e a
-   . FormContext (CoproductForm c1 c2 e a) (i1 /\ i2) o
-  => i2
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-rload i f = load (map (const i) $ current f) f
-
-biload
-  :: forall c1 c2 i1 i2 o e a
-   . FormContext (CoproductForm c1 c2 e a) (i1 /\ i2) o
-  => i1
-  -> i2
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-biload i1 i2 = load (i1 /\ i2)
-
-lupdate
-  :: forall c1 c2 i1 i2 o e a
-   . FormContext (CoproductForm c1 c2 e a) (i1 /\ i2) o
-  => i1
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-lupdate i f = update (lmap (const i) $ current f) f
-
-rupdate
-  :: forall c1 c2 i1 i2 o e a
-   . FormContext (CoproductForm c1 c2 e a) (i1 /\ i2) o
-  => i2
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-rupdate i f = update (map (const i) $ current f) f
-
-biupdate
-  :: forall c1 c2 i1 i2 o e a
-   . FormContext (CoproductForm c1 c2 e a) (i1 /\ i2) o
-  => i1
-  -> i2
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-biupdate i1 i2 = update (i1 /\ i2)
-
-biimapContext
-  :: forall c1 c1' c2 c2' e a
-   . (c1' -> c1)
-  -> (c1 -> c1')
-  -> (c2' -> c2)
-  -> (c2 -> c2')
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1' c2' e a
-biimapContext f g i j = over CoproductForm $ imapContext (bimap f i) (bimap g j)
-
-choose
-  :: forall c1 c2 e a
+updateChoice
+  :: forall cl cr e a
    . Boolean
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-choose choice = over CoproductForm $ overContext go
-  where
-  go (CoproductContext initialChoice _ c1 c2) =
-    CoproductContext initialChoice choice c1 c2
+  -> CoproductForm cl cr e a
+  -> CoproductForm cl cr e a
+updateChoice choice =
+  overContext \(CoproductContext initialChoice _ cl cr) ->
+    CoproductContext initialChoice choice cl cr
 
 loadChoice
-  :: forall c1 c2 e a
+  :: forall cl cr e a
    . Boolean
-  -> CoproductForm c1 c2 e a
-  -> CoproductForm c1 c2 e a
-loadChoice choice = over CoproductForm $ overContext go
-  where
-  go (CoproductContext _ _ c1 c2) =
-    CoproductContext choice choice c1 c2
+  -> CoproductForm cl cr e a
+  -> CoproductForm cl cr e a
+loadChoice choice =
+  overContext \(CoproductContext _ _ cl cr) ->
+    CoproductContext choice choice cl cr

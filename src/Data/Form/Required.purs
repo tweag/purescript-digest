@@ -9,7 +9,13 @@ import Control.Plus (class Plus)
 import Data.Compactable (class Compactable, compact)
 import Data.Either (Either(..))
 import Data.Enum (class BoundedEnum, class Enum)
-import Data.Enum.Generic (genericCardinality, genericFromEnum, genericPred, genericSucc, genericToEnum)
+import Data.Enum.Generic
+  ( genericCardinality
+  , genericFromEnum
+  , genericPred
+  , genericSucc
+  , genericToEnum
+  )
 import Data.Eq (class Eq1)
 import Data.Filterable (class Filterable, filterDefault, partitionDefault)
 import Data.Foldable (class Foldable)

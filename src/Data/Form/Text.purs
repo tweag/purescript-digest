@@ -15,7 +15,14 @@ import Data.Bifunctor (class Bifunctor, lmap)
 import Data.Either (Either(..), note)
 import Data.Filterable (filter)
 import Data.Foldable (class Foldable)
-import Data.Form (class FormContext, arbitraryFormContext, Form, mkForm, required)
+import Data.Form
+  ( class ArbitraryFormContext
+  , class FormContext
+  , Form
+  , arbitraryFormContext
+  , form
+  , required
+  )
 import Data.Form.Required (Required)
 import Data.Form.Result (Result(..), fromEither)
 import Data.Functor.Invariant (class Invariant)
@@ -42,18 +49,18 @@ newtype TextForm e a = TextForm (Form TextContext e a)
 -------------------------------------------------------------------------------
 
 text :: forall e. TextForm e String
-text = TextForm $ mkForm (TextContext "" "") Ok
+text = form (TextContext "" "") Ok
 
 parsed :: forall e a. (String -> Either e a) -> TextForm e a
 parsed parse =
   TextForm
-    $ mkForm (TextContext "" "")
+    $ form (TextContext "" "")
     $ fromEither <<< lmap Just <<< parse
 
 parsedNonEmpty :: forall e a. (String -> Either e a) -> TextForm e (Maybe a)
 parsedNonEmpty parse =
   TextForm
-    $ mkForm (TextContext "" "")
+    $ form (TextContext "" "")
     $ traverse (fromEither <<< lmap Just <<< parse)
         <<< filter (not null)
         <<< Just
@@ -108,11 +115,15 @@ instance showTextContext :: Show TextContext where
     ]
 
 instance formContextTextContext :: FormContext TextContext String String where
-  current (TextContext _ curr) = curr
-  initial (TextContext init _) = init
-  load input _ = TextContext input input
-  output (TextContext _ curr) = curr
-  update input (TextContext init _) = TextContext init input
+  ctx_current (TextContext _ curr) = curr
+  ctx_initial (TextContext init _) = init
+  ctx_load input _ = TextContext input input
+  ctx_output (TextContext _ curr) = curr
+  ctx_update input (TextContext init _) = TextContext init input
+
+instance arbitraryFormContextTextContext ::
+  ArbitraryFormContext TextContext String String where
+  genBlank = pure $ TextContext "" ""
 
 instance arbitraryTextContext :: Arbitrary TextContext where
-  arbitrary = arbitraryFormContext $ pure (TextContext "" "")
+  arbitrary = arbitraryFormContext

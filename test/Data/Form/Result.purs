@@ -5,8 +5,22 @@ import Prelude
 import Data.Form.Result (Result)
 import Effect.Class (liftEffect)
 import Test.QuickCheck.Laws (A, B)
-import Test.QuickCheck.Laws.Control (checkAlt, checkApplicative, checkApply, checkBind, checkExtend, checkMonad)
-import Test.QuickCheck.Laws.Data (checkBounded, checkEq, checkFoldable, checkFunctor, checkOrd, checkSemigroup)
+import Test.QuickCheck.Laws.Control
+  ( checkAlt
+  , checkApplicative
+  , checkApply
+  , checkBind
+  , checkExtend
+  , checkMonad
+  )
+import Test.QuickCheck.Laws.Data
+  ( checkBounded
+  , checkEq
+  , checkFoldable
+  , checkFunctor
+  , checkOrd
+  , checkSemigroup
+  )
 import Test.Spec (Spec, describe, it)
 import Type.Proxy (Proxy(..), Proxy2(..))
 
