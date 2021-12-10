@@ -2,39 +2,12 @@ module Test.Data.Form.Text where
 
 import Prelude
 
-import Data.Form.Text (TextContext)
-import Effect.Class (liftEffect)
-import Test.Data.Form
-  ( checkCoproductForm
-  , checkForm
-  , checkProductForm
-  , checkTraversableForm
-  )
-import Test.QuickCheck.Laws.Data (checkEq, checkOrd)
-import Test.Spec (Spec, describe, it)
-import Type.Proxy (Proxy(..), Proxy2(..))
+import Data.Form.Text (TextForm)
+import Test.Data.Form (checkForm)
+import Test.Spec (Spec, describe)
+import Type.Proxy (Proxy3(..))
 
 spec :: Spec Unit
 spec = do
   describe "TextForm" do
-    checkForm (Proxy :: _ TextContext)
-    checkProductForm
-      (Proxy :: _ TextContext)
-      (Proxy :: _ TextContext)
-      (Proxy :: _ Int)
-      (Proxy :: _ Int)
-      (Proxy :: _ Int)
-      (Proxy :: _ Int)
-    checkCoproductForm
-      (Proxy :: _ TextContext)
-      (Proxy :: _ TextContext)
-      (Proxy :: _ Int)
-      (Proxy :: _ Int)
-      (Proxy :: _ Int)
-      (Proxy :: _ Int)
-    checkTraversableForm (Proxy2 :: _ Array) (Proxy :: _ TextContext)
-  describe "TextContext" do
-    it "obeys the Eq laws" do
-      liftEffect $ checkEq (Proxy :: _ TextContext)
-    it "obeys the Ord laws" do
-      liftEffect $ checkOrd (Proxy :: _ TextContext)
+    checkForm (Proxy3 :: _ TextForm)

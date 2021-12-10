@@ -1,193 +1,108 @@
 module Data.Form.Product
   ( ProductForm(..)
-  , ProductContext
   , product
   ) where
 
 import Prelude
 
 import Data.Bifoldable (class Bifoldable)
-import Data.Bifunctor (class Bifunctor, lmap)
-import Data.Either (Either(..))
-import Data.Either.Nested (type (\/))
+import Data.Bifunctor (class Bifunctor)
 import Data.Foldable (class Foldable)
 import Data.Form
-  ( class ArbitraryFormContext
-  , class FormContext
-  , class IsForm
-  , Form
-  , arbitraryFormContext
-  , coarbitraryFormContext
-  , ctx_current
-  , ctx_initial
-  , ctx_load
-  , ctx_output
-  , ctx_update
+  ( class Form
+  , FormT(..)
+  , arbitraryFn
+  , arbitraryForm
+  , bindResult
   , form
-  , fromForm
-  , genBlank
-  , toForm
+  , ignoreError
   )
-import Data.Form.Result (Result, ignore)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
-import Data.Newtype (class Newtype)
-import Data.Tuple (Tuple(..))
+import Data.Newtype (class Newtype, unwrap)
+import Data.Profunctor.Star (Star(..))
+import Data.Profunctor.Strong ((***))
 import Data.Tuple.Nested (type (/\), (/\))
-import Test.QuickCheck (class Arbitrary, class Coarbitrary)
+import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary)
 
 -------------------------------------------------------------------------------
 -- Model
 -------------------------------------------------------------------------------
 
-data ProductContext c1 c2 = ProductContext c1 c2
-
-newtype ProductForm c1 c2 e a = ProductForm (Form (ProductContext c1 c2) e a)
+newtype ProductForm f g e a = ProductForm (FormT (f /\ g) e a)
 
 -------------------------------------------------------------------------------
 -- Constructors
 -------------------------------------------------------------------------------
 
 product
-  :: forall f1 f2 c1 c2 i1 i2 o1 o2 e1 e2 a b e
-   . FormContext c1 i1 o1
-  => FormContext c2 i2 o2
-  => IsForm f1 c1 e1 a
-  => IsForm f2 c2 e2 b
-  => f1 e1 a
-  -> f2 e2 b
-  -> ProductForm (f1 e1 a) (f2 e2 b) e (a /\ b)
-product f1 f2 = form (ProductContext f1 f2) ignore
+  :: forall f g i j e1 e2 e a b
+   . Form f i
+  => Form g j
+  => f e1 a
+  -> g e2 b
+  -> ProductForm (f e1 a) (g e2 b) e (a /\ b)
+product f g =
+  form (f /\ g) validate
+  where
+  validate = unwrap $ Star ignoreError *** Star ignoreError
 
 -------------------------------------------------------------------------------
 -- Instances
 -------------------------------------------------------------------------------
 
-derive instance genericProductForm :: Generic (ProductForm c1 c2 e a) _
+derive instance genericProductForm :: Generic (ProductForm f g e a) _
 
-derive instance newtypeProductForm :: Newtype (ProductForm c1 c2 e a) _
+derive instance newtypeProductForm :: Newtype (ProductForm f g e a) _
 
 derive instance eqProductForm ::
-  ( Eq c1
-  , Eq c2
+  ( Eq f
+  , Eq g
   , Eq e
   , Eq a
   ) =>
-  Eq (ProductForm c1 c2 e a)
+  Eq (ProductForm f g e a)
 
-derive instance functorProductForm :: Functor (ProductForm c1 c2 e)
+derive instance functorProductForm :: Functor (ProductForm f g e)
 
-derive newtype instance invariantProductForm :: Invariant (ProductForm c1 c2 e)
+derive newtype instance invariantProductForm ::
+  Invariant (ProductForm f g e)
 
-derive newtype instance bifunctorProductForm :: Bifunctor (ProductForm c1 c2)
+derive newtype instance bifunctorProductForm ::
+  Bifunctor (ProductForm f g)
 
-derive newtype instance foldableProductForm :: Foldable (ProductForm c1 c2 e)
+derive newtype instance foldableProductForm ::
+  Foldable (ProductForm f g e)
 
-derive newtype instance bifoldableProductForm :: Bifoldable (ProductForm c1 c2)
+derive newtype instance bifoldableProductForm ::
+  Bifoldable (ProductForm f g)
 
-derive newtype instance arbitraryProductForm ::
-  ( ArbitraryFormContext (ProductContext c1 c2) i o
-  , Arbitrary (ProductContext c1 c2)
-  , Arbitrary i
-  , Arbitrary e
-  , Arbitrary a
-  , Coarbitrary o
+derive newtype instance showProductForm ::
+  ( Show f
+  , Show g
+  , Show e
+  , Show a
   ) =>
-  Arbitrary (ProductForm c1 c2 e a)
+  Show (ProductForm f g e a)
+
+instance arbitraryProductForm ::
+  ( Arbitrary t
+  , Arbitrary e
+  , Arbitrary (f e1 a)
+  , Arbitrary (g e2 b)
+  , Coarbitrary (f e1 a)
+  , Coarbitrary (g e2 b)
+  , Coarbitrary a
+  , Coarbitrary b
+  , Form f i
+  , Form g j
+  ) =>
+  Arbitrary (ProductForm (f e1 a) (g e2 b) e t) where
+  arbitrary = arbitraryForm
+    $ (bindResult <$> arbitraryFn) <*> (product <$> arbitrary <*> arbitrary)
 
 derive newtype instance coarbitraryProductForm ::
-  ( FormContext (ProductContext c1 c2) i o
-  , Coarbitrary o
-  , Coarbitrary e
+  ( Coarbitrary e
   , Coarbitrary a
   ) =>
-  Coarbitrary (ProductForm c1 c2 e a)
-
-derive instance eqProductContext :: (Eq c1, Eq c2) => Eq (ProductContext c1 c2)
-derive instance ordProductContext ::
-  ( Ord c1
-  , Ord c2
-  ) =>
-  Ord (ProductContext c1 c2)
-
-derive instance functorProductContext :: Functor (ProductContext c1)
-instance bifunctorProductContext :: Bifunctor ProductContext where
-  bimap f g (ProductContext c1 c2) = ProductContext (f c1) (g c2)
-
-instance showProductContext :: (Show c1, Show c2) => Show (ProductContext c1 c2) where
-  show (ProductContext c1 c2) =
-    "(ProductContext " <> show c1 <> " " <> show c2 <> ")"
-
-instance formContextProduct ::
-  ( FormContext c1 i1 o1
-  , FormContext c2 i2 o2
-  , IsForm f1 c1 e1 a
-  , IsForm f2 c2 e2 b
-  ) =>
-  FormContext
-    (ProductContext (f1 e1 a) (f2 e2 b))
-    (i1 /\ i2)
-    (Result (e1 \/ e2) (a /\ b)) where
-  ctx_current (ProductContext f1 f2) =
-    ctx_current (toForm f1) /\ ctx_current (toForm f2)
-  ctx_initial (ProductContext f1 f2) =
-    ctx_initial (toForm f1) /\ ctx_initial (toForm f2)
-  ctx_load (i1 /\ i2) (ProductContext f1 f2) =
-    ProductContext
-      (fromForm $ ctx_load i1 $ toForm f1)
-      (fromForm $ ctx_load i2 $ toForm f2)
-  ctx_output (ProductContext f1 f2) =
-    Tuple
-      <$> lmap Left (ctx_output (toForm f1))
-      <*> lmap Right (ctx_output (toForm f2))
-  ctx_update (i1 /\ i2) (ProductContext f1 f2) =
-    ProductContext
-      (fromForm $ ctx_update i1 $ toForm f1)
-      (fromForm $ ctx_update i2 $ toForm f2)
-
-instance arbitraryFormContextProduct ::
-  ( ArbitraryFormContext cl i1 o1
-  , ArbitraryFormContext cr i2 o2
-  , Arbitrary i1
-  , Arbitrary i2
-  , Arbitrary e1
-  , Arbitrary e2
-  , Arbitrary a
-  , Arbitrary b
-  , Coarbitrary o1
-  , Coarbitrary o2
-  , IsForm f1 cl e1 a
-  , IsForm f2 cr e2 b
-  ) =>
-  ArbitraryFormContext
-    (ProductContext (f1 e1 a) (f2 e2 b))
-    (i1 /\ i2)
-    (Result (e1 \/ e2) (a /\ b)) where
-  genBlank =
-    ProductContext
-      <$> (fromForm <$> genBlank)
-      <*> (fromForm <$> genBlank)
-
-instance arbitraryProductContext ::
-  ( ArbitraryFormContext cl i1 o1
-  , ArbitraryFormContext cr i2 o2
-  , Arbitrary i1
-  , Arbitrary i2
-  , Arbitrary e1
-  , Arbitrary e2
-  , Arbitrary a
-  , Arbitrary b
-  , Coarbitrary o1
-  , Coarbitrary o2
-  , IsForm f1 cl e1 a
-  , IsForm f2 cr e2 b
-  ) =>
-  Arbitrary (ProductContext (f1 e1 a) (f2 e2 b)) where
-  arbitrary = arbitraryFormContext
-
-instance coarbitraryProductContext ::
-  ( FormContext (ProductContext c1 c2) i o
-  , Coarbitrary o
-  ) =>
-  Coarbitrary (ProductContext c1 c2) where
-  coarbitrary = coarbitraryFormContext
+  Coarbitrary (ProductForm f g e a)

@@ -13,7 +13,7 @@ import Data.Eq (class Eq1)
 import Data.Foldable (class Foldable)
 import Data.Functor.Invariant (class Invariant, imapF)
 import Data.Generic.Rep (class Generic)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..))
 import Data.NonEmpty ((:|))
 import Data.Ord (class Ord1)
 import Data.Show.Generic (genericShow)
@@ -197,8 +197,8 @@ fromOk' _ (Ok b) = b
 fromOk' default _ = default unit
 
 -- | Turns an `Either` into a `Result`.
-fromEither :: forall e. Either (Maybe e) ~> Result e
-fromEither = either (maybe Unevaluated Error) Ok
+fromEither :: forall e. Either e ~> Result e
+fromEither = either Error Ok
 
 -- | Turns a `Result` into an `Either`.
 toEither :: forall e. Result e ~> Either (Maybe e)
