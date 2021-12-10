@@ -27,7 +27,7 @@ import Data.Form
   , ctx_update
   , form
   , fromForm
-  , overContext
+  , mapContext
   , toForm
   , viewContext
   )
@@ -201,7 +201,7 @@ updateChoice
   -> CoproductForm cl cr e a
   -> CoproductForm cl cr e a
 updateChoice choice =
-  overContext \(CoproductContext initialChoice _ cl cr) ->
+  mapContext \(CoproductContext initialChoice _ cl cr) ->
     CoproductContext initialChoice choice cl cr
 
 loadChoice
@@ -210,5 +210,5 @@ loadChoice
   -> CoproductForm cl cr e a
   -> CoproductForm cl cr e a
 loadChoice choice =
-  overContext \(CoproductContext _ _ cl cr) ->
+  mapContext \(CoproductContext _ _ cl cr) ->
     CoproductContext choice choice cl cr

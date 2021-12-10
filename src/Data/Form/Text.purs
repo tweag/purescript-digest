@@ -23,7 +23,6 @@ import Data.Form
   , form
   , required
   )
-import Data.Form.Required (Required)
 import Data.Form.Result (Result(..), fromEither)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
@@ -66,13 +65,13 @@ parsedNonEmpty parse =
         <<< Just
         <<< trim
 
-textRequired :: forall e. TextForm (Required e) NonEmptyString
+textRequired :: forall e. TextForm (Maybe e) NonEmptyString
 textRequired = over TextForm required $ parsed (Right <<< NES.fromString)
 
 number :: TextForm Unit (Maybe Number)
 number = parsedNonEmpty $ note unit <<< Number.fromString
 
-numberRequired :: TextForm (Required Unit) Number
+numberRequired :: TextForm (Maybe Unit) Number
 numberRequired = over TextForm required number
 
 -------------------------------------------------------------------------------

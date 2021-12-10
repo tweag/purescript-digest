@@ -12,7 +12,9 @@ module Data.Form
   , ctx_update
   , current
   , dirty
+  , extendContext
   , extendResult
+  , extractContext
   , extractResult
   , form
   , form'
@@ -21,24 +23,19 @@ module Data.Form
   , imapContext
   , initial
   , load
-  , loadBoth
-  , loadLeft
-  , loadRight
+  , loadFrom
+  , mapContext
   , mapEither
-  , overContext
-  , overInput
+  , mapResult
   , peekResult
   , peeksResult
+  , putContext
   , required
   , runForm
   , save
-  , setContext
   , toForm
   , update
-  , updateBoth
-  , updateLeft
-  , updateRight
-  , viewContext
+  , updateTo
   ) where
 
 import Prelude
@@ -52,7 +49,6 @@ import Control.Comonad.Store
   , pos
   , runStore
   , seek
-  , seeks
   , store
   )
 import Control.Monad.Gen (frequency, resize, sized)
@@ -66,18 +62,17 @@ import Data.Bifunctor (class Bifunctor, bimap, lmap)
 import Data.Either (Either, either, hush, note)
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, foldMap, foldlDefault, foldrDefault)
-import Data.Form.Required (Required(..))
 import Data.Form.Result (Result(..), toEither)
 import Data.Function (on)
 import Data.Functor.Invariant (class Invariant, imapF)
 import Data.Int (toNumber)
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.NonEmpty ((:|))
 import Data.Profunctor (lcmap)
 import Data.Profunctor.Strong ((&&&))
-import Data.Tuple (Tuple(..), curry, fst, uncurry)
-import Data.Tuple.Nested (type (/\), (/\))
+import Data.Tuple (Tuple(..), fst, uncurry)
+import Data.Tuple.Nested ((/\))
 import Test.QuickCheck
   ( class Arbitrary
   , class Coarbitrary
@@ -213,7 +208,7 @@ instance arbitraryForm ::
 
 instance showForm :: (Show ctx, Show e, Show a) => Show (Form ctx e a) where
   show f =
-    "(Form " <> show (viewContext f) <> " " <> show (extractResult f) <> ")"
+    "(Form " <> show (extractContext f) <> " " <> show (extractResult f) <> ")"
 
 -------------------------------------------------------------------------------
 -- Constructors
@@ -240,6 +235,9 @@ form' ctx = form ctx Ok
 -- Combinators
 -------------------------------------------------------------------------------
 
+putContext :: forall f ctx e a. IsForm f ctx e a => ctx -> f e a -> f e a
+putContext ctx = overStore $ seek ctx
+
 imapContext
   :: forall f f' ctx ctx' e a
    . IsForm f ctx e a
@@ -252,6 +250,14 @@ imapContext f g = overStore $ uncurry store <<< uncurry go <<< runStore
   where
   go p s = Tuple (lcmap f p) $ g s
 
+extendContext
+  :: forall ctx f e a. IsForm f ctx e a => (f e a -> ctx) -> f e a -> f e a
+extendContext f = uncurry putContext <<< (f &&& identity)
+
+mapContext
+  :: forall f ctx e a. IsForm f ctx e a => (ctx -> ctx) -> f e a -> f e a
+mapContext f = extendContext $ f <<< extractContext
+
 extendResult
   :: forall f ctx e e' a b
    . IsForm f ctx e a
@@ -261,6 +267,15 @@ extendResult
   -> f e' b
 extendResult f = overStore $ extend $ f <<< Form
 
+mapResult
+  :: forall f ctx e a b
+   . IsForm f ctx e a
+  => IsForm f ctx e b
+  => (a -> Result e b)
+  -> f e a
+  -> f e b
+mapResult f = extendResult $ f <=< extractResult
+
 mapEither
   :: forall f ctx e a b
    . IsForm f ctx e a
@@ -268,17 +283,7 @@ mapEither
   => (a -> Either e b)
   -> f e a
   -> f e b
-mapEither f = extendResult $ either Error Ok <<< f <=< extractResult
-
-setContext :: forall f ctx e a. IsForm f ctx e a => ctx -> f e a -> f e a
-setContext ctx = overStore $ seek ctx
-
-overContext
-  :: forall f ctx e a. IsForm f ctx e a => (ctx -> ctx) -> f e a -> f e a
-overContext f = overStore $ seeks f
-
-extractResult :: forall f ctx e a. IsForm f ctx e a => f e a -> Result e a
-extractResult = extract <<< unForm
+mapEither = mapResult <<< compose (either Error Ok)
 
 peekResult :: forall f ctx e a. IsForm f ctx e a => ctx -> f e a -> Result e a
 peekResult ctx = peek ctx <<< unForm
@@ -291,27 +296,11 @@ required
   :: forall f ctx e a
    . Bifunctor f
   => IsForm f ctx e (Maybe a)
-  => IsForm f ctx (Required e) (Maybe a)
-  => IsForm f ctx (Required e) a
+  => IsForm f ctx (Maybe e) (Maybe a)
+  => IsForm f ctx (Maybe e) a
   => f e (Maybe a)
-  -> f (Required e) a
-required = mapEither (note Missing) <<< lmap Invalid
-
-current
-  :: forall ctx f i o e a
-   . FormContext ctx i o
-  => IsForm f ctx e a
-  => f e a
-  -> i
-current = ctx_current <<< viewContext
-
-initial
-  :: forall ctx f i o e a
-   . FormContext ctx i o
-  => IsForm f ctx e a
-  => f e a
-  -> i
-initial = ctx_initial <<< viewContext
+  -> f (Maybe e) a
+required = mapEither (note Nothing) <<< lmap Just
 
 load
   :: forall ctx f i o e a
@@ -320,38 +309,16 @@ load
   => i
   -> f e a
   -> f e a
-load = overContext <<< ctx_load
+load = mapContext <<< ctx_load
 
-loadLeft
-  :: forall f g c1 c2 i1 i2 o e a
-   . FormContext (g c1 c2) (i1 /\ i2) o
-  => IsForm f (g c1 c2) e a
-  => Bifunctor g
-  => i1
+loadFrom
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => (i -> i)
   -> f e a
   -> f e a
-loadLeft i f = load (lmap (const i) $ current f) f
-
-loadRight
-  :: forall f g c i1 i2 o e a
-   . FormContext (g c) (i1 /\ i2) o
-  => IsForm f (g c) e a
-  => Functor g
-  => i2
-  -> f e a
-  -> f e a
-loadRight i f = load (map (const i) $ current f) f
-
-loadBoth
-  :: forall f g c1 c2 i1 i2 o e a
-   . FormContext (g c1 c2) (i1 /\ i2) o
-  => IsForm f (g c1 c2) e a
-  => Bifunctor g
-  => i1
-  -> i2
-  -> f e a
-  -> f e a
-loadBoth = curry load
+loadFrom f = uncurry load <<< (f <<< initial &&& identity)
 
 update
   :: forall ctx f i o e a
@@ -360,38 +327,16 @@ update
   => i
   -> f e a
   -> f e a
-update = overContext <<< ctx_update
+update = mapContext <<< ctx_update
 
-updateLeft
-  :: forall f g c1 c2 i1 i2 o e a
-   . FormContext (g c1 c2) (i1 /\ i2) o
-  => IsForm f (g c1 c2) e a
-  => Bifunctor g
-  => i1
+updateTo
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => (i -> i)
   -> f e a
   -> f e a
-updateLeft i f = update (lmap (const i) $ current f) f
-
-updateRight
-  :: forall f g c i1 i2 o e a
-   . FormContext (g c) (i1 /\ i2) o
-  => IsForm f (g c) e a
-  => Functor g
-  => i2
-  -> f e a
-  -> f e a
-updateRight i f = update (map (const i) $ current f) f
-
-updateBoth
-  :: forall f g c1 c2 i1 i2 o e a
-   . FormContext (g c1 c2) (i1 /\ i2) o
-  => IsForm f (g c1 c2) e a
-  => Bifunctor g
-  => i1
-  -> i2
-  -> f e a
-  -> f e a
-updateBoth = curry update
+updateTo f = uncurry update <<< (f <<< current &&& identity)
 
 save
   :: forall ctx f i o e a
@@ -412,8 +357,27 @@ runForm
   -> Tuple (ctx -> Result e a) ctx
 runForm = runStore <<< unForm
 
-viewContext :: forall ctx f e a. IsForm f ctx e a => f e a -> ctx
-viewContext = pos <<< unForm
+extractContext :: forall ctx f e a. IsForm f ctx e a => f e a -> ctx
+extractContext = pos <<< unForm
+
+current
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => f e a
+  -> i
+current = ctx_current <<< extractContext
+
+initial
+  :: forall ctx f i o e a
+   . FormContext ctx i o
+  => IsForm f ctx e a
+  => f e a
+  -> i
+initial = ctx_initial <<< extractContext
+
+extractResult :: forall f ctx e a. IsForm f ctx e a => f e a -> Result e a
+extractResult = extract <<< unForm
 
 collectResults
   :: forall form f ctx e a
@@ -435,16 +399,6 @@ dirty
   => f e a
   -> Boolean
 dirty = uncurry notEq <<< (initial &&& current)
-
-overInput
-  :: forall ctx f i o e a
-   . FormContext ctx i o
-  => IsForm f ctx e a
-  => FormContext ctx i o
-  => (i -> i)
-  -> f e a
-  -> f e a
-overInput f = uncurry update <<< (f <<< current &&& identity)
 
 -------------------------------------------------------------------------------
 -- Private helpers
