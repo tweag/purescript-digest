@@ -20,6 +20,7 @@ import Data.Form
   , class FormContext
   , Form
   , arbitraryFormContext
+  , coarbitraryFormContext
   , form
   , required
   )
@@ -33,7 +34,7 @@ import Data.String (joinWith, null, trim)
 import Data.String.NonEmpty as NES
 import Data.String.NonEmpty.Internal (NonEmptyString)
 import Data.Traversable (traverse)
-import Test.QuickCheck (class Arbitrary)
+import Test.QuickCheck (class Arbitrary, class Coarbitrary)
 
 -------------------------------------------------------------------------------
 -- Model
@@ -100,6 +101,12 @@ derive newtype instance arbitraryTextForm ::
   ) =>
   Arbitrary (TextForm e a)
 
+derive newtype instance coarbitraryTextForm ::
+  ( Coarbitrary e
+  , Coarbitrary a
+  ) =>
+  Coarbitrary (TextForm e a)
+
 derive instance eqTextContext :: Eq TextContext
 
 derive instance ordTextContext :: Ord TextContext
@@ -126,3 +133,6 @@ instance arbitraryFormContextTextContext ::
 
 instance arbitraryTextContext :: Arbitrary TextContext where
   arbitrary = arbitraryFormContext
+
+instance coarbitraryTextContext :: Coarbitrary TextContext where
+  coarbitrary = coarbitraryFormContext

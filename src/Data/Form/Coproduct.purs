@@ -12,24 +12,28 @@ module Data.Form.Coproduct
 import Prelude
 
 import Data.Bifoldable (class Bifoldable)
-import Data.Bifunctor (class Bifunctor, bimap)
+import Data.Bifunctor (class Bifunctor)
 import Data.Either (Either(..))
 import Data.Either.Nested (type (\/))
 import Data.Foldable (class Foldable)
 import Data.Form
-  ( class FormContext
+  ( class ArbitraryFormContext
+  , class FormContext
   , class IsForm
   , Form
+  , arbitraryFormContext
+  , coarbitraryFormContext
   , ctx_current
   , ctx_initial
   , ctx_load
   , ctx_output
   , ctx_update
+  , extractContext
   , form
   , fromForm
+  , genBlank
   , mapContext
   , toForm
-  , viewContext
   )
 import Data.Form.Result (Result, ignore)
 import Data.Functor.Invariant (class Invariant)
@@ -39,7 +43,7 @@ import Data.Profunctor.Strong ((&&&))
 import Data.String (joinWith)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary)
+import Test.QuickCheck (class Arbitrary, class Coarbitrary)
 
 -------------------------------------------------------------------------------
 -- Model
@@ -100,25 +104,23 @@ derive newtype instance foldableCoproductForm ::
 derive newtype instance bifoldableCoproductForm ::
   Bifoldable (CoproductForm cl cr)
 
-instance arbitraryNewtypeCoproductContext ::
-  ( Arbitrary cl
-  , Arbitrary cr
-  , Arbitrary i1
-  , Arbitrary i2
-  , Arbitrary e1
-  , Arbitrary e2
+derive newtype instance arbitraryCoproductForm ::
+  ( ArbitraryFormContext (CoproductContext c1 c2) i o
+  , Arbitrary (CoproductContext c1 c2)
+  , Arbitrary i
+  , Arbitrary e
   , Arbitrary a
-  , Arbitrary b
-  , Coarbitrary o1
-  , Coarbitrary o2
-  , FormContext cl i1 o1
-  , FormContext cr i2 o2
-  , IsForm (f1 cl) cl e1 a
-  , IsForm (f2 cr) cr e2 b
+  , Coarbitrary o
   ) =>
-  Arbitrary (CoproductContext (f1 cl e1 a) (f2 cr e2 b)) where
-  arbitrary = map (bimap fromForm fromForm)
-    $ CoproductContext <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary
+  Arbitrary (CoproductForm c1 c2 e a)
+
+derive newtype instance coarbitraryCoproductForm ::
+  ( FormContext (CoproductContext c1 c2) i o
+  , Coarbitrary o
+  , Coarbitrary e
+  , Coarbitrary a
+  ) =>
+  Coarbitrary (CoproductForm c1 c2 e a)
 
 derive instance eqCoproductContext ::
   ( Eq cl
@@ -182,11 +184,59 @@ instance formContextCoproduct ::
       (fromForm $ ctx_update i1 $ toForm f1)
       (fromForm $ ctx_update i2 $ toForm f2)
 
+instance arbitraryFormContextCoproduct ::
+  ( ArbitraryFormContext cl i1 o1
+  , ArbitraryFormContext cr i2 o2
+  , Arbitrary i1
+  , Arbitrary i2
+  , Arbitrary e1
+  , Arbitrary e2
+  , Arbitrary a
+  , Arbitrary b
+  , Coarbitrary o1
+  , Coarbitrary o2
+  , IsForm f1 cl e1 a
+  , IsForm f2 cr e2 b
+  ) =>
+  ArbitraryFormContext
+    (CoproductContext (f1 e1 a) (f2 e2 b))
+    (Boolean /\ i1 /\ i2)
+    (Result e1 a \/ Result e2 b) where
+  genBlank =
+    CoproductContext false false
+      <$> (fromForm <$> genBlank)
+      <*> (fromForm <$> genBlank)
+
+instance arbitraryCoproductContext ::
+  ( ArbitraryFormContext cl i1 o1
+  , ArbitraryFormContext cr i2 o2
+  , Arbitrary i1
+  , Arbitrary i2
+  , Arbitrary e1
+  , Arbitrary e2
+  , Arbitrary a
+  , Arbitrary b
+  , Coarbitrary o1
+  , Coarbitrary o2
+  , IsForm f1 cl e1 a
+  , IsForm f2 cr e2 b
+  ) =>
+  Arbitrary (CoproductContext (f1 e1 a) (f2 e2 b)) where
+  arbitrary = arbitraryFormContext
+
+instance coarbitraryCoproductContext ::
+  ( FormContext (CoproductContext c1 c2) i o
+  , Coarbitrary o
+  ) =>
+  Coarbitrary (CoproductContext c1 c2) where
+  coarbitrary = coarbitraryFormContext
+
 viewChoice :: forall cl cr e a. CoproductForm cl cr e a -> Boolean
-viewChoice = viewContext >>> \(CoproductContext _ choice _ _) -> choice
+viewChoice = extractContext >>> \(CoproductContext _ choice _ _) -> choice
 
 viewInitialChoice :: forall cl cr e a. CoproductForm cl cr e a -> Boolean
-viewInitialChoice = viewContext >>> \(CoproductContext choice _ _ _) -> choice
+viewInitialChoice = extractContext >>> \(CoproductContext choice _ _ _) ->
+  choice
 
 overChoice
   :: forall cl cr e a

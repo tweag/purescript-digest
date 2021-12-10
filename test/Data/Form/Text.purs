@@ -4,10 +4,15 @@ import Prelude
 
 import Data.Form.Text (TextContext)
 import Effect.Class (liftEffect)
-import Test.Data.Form (checkCoproductForm, checkForm, checkProductForm)
+import Test.Data.Form
+  ( checkCoproductForm
+  , checkForm
+  , checkProductForm
+  , checkTraversableForm
+  )
 import Test.QuickCheck.Laws.Data (checkEq, checkOrd)
 import Test.Spec (Spec, describe, it)
-import Type.Proxy (Proxy(..))
+import Type.Proxy (Proxy(..), Proxy2(..))
 
 spec :: Spec Unit
 spec = do
@@ -27,6 +32,7 @@ spec = do
       (Proxy :: _ Int)
       (Proxy :: _ Int)
       (Proxy :: _ Int)
+    checkTraversableForm (Proxy2 :: _ Array) (Proxy :: _ TextContext)
   describe "TextContext" do
     it "obeys the Eq laws" do
       liftEffect $ checkEq (Proxy :: _ TextContext)

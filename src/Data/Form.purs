@@ -4,6 +4,7 @@ module Data.Form
   , class ArbitraryFormContext
   , class FormContext
   , class IsForm
+  , coarbitraryFormContext
   , collectResults
   , ctx_current
   , ctx_initial
@@ -167,6 +168,15 @@ instance arbitraryFormContextForm ::
 class FormContext ctx i o <= ArbitraryFormContext ctx i o | ctx -> i o where
   genBlank :: Gen ctx
 
+coarbitraryFormContext
+  :: forall ctx i o r
+   . FormContext ctx i o
+  => Coarbitrary o
+  => ctx
+  -> Gen r
+  -> Gen r
+coarbitraryFormContext = coarbitrary <<< ctx_output
+
 arbitraryFormContext
   :: forall ctx i o
    . ArbitraryFormContext ctx i o
@@ -205,6 +215,13 @@ instance arbitraryForm ::
   ) =>
   Arbitrary (Form ctx e a) where
   arbitrary = genForm arbitrary
+
+instance coarbitraryForm ::
+  ( Coarbitrary e
+  , Coarbitrary a
+  ) =>
+  Coarbitrary (Form ctx e a) where
+  coarbitrary = coarbitrary <<< extractResult
 
 instance showForm :: (Show ctx, Show e, Show a) => Show (Form ctx e a) where
   show f =

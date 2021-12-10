@@ -7,14 +7,17 @@ module Data.Form.Product
 import Prelude
 
 import Data.Bifoldable (class Bifoldable)
-import Data.Bifunctor (class Bifunctor, bimap, lmap)
+import Data.Bifunctor (class Bifunctor, lmap)
 import Data.Either (Either(..))
 import Data.Either.Nested (type (\/))
 import Data.Foldable (class Foldable)
 import Data.Form
-  ( class FormContext
+  ( class ArbitraryFormContext
+  , class FormContext
   , class IsForm
   , Form
+  , arbitraryFormContext
+  , coarbitraryFormContext
   , ctx_current
   , ctx_initial
   , ctx_load
@@ -22,6 +25,7 @@ import Data.Form
   , ctx_update
   , form
   , fromForm
+  , genBlank
   , toForm
   )
 import Data.Form.Result (Result, ignore)
@@ -30,7 +34,7 @@ import Data.Generic.Rep (class Generic)
 import Data.Newtype (class Newtype)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Test.QuickCheck (class Arbitrary, class Coarbitrary, arbitrary)
+import Test.QuickCheck (class Arbitrary, class Coarbitrary)
 
 -------------------------------------------------------------------------------
 -- Model
@@ -81,25 +85,23 @@ derive newtype instance foldableProductForm :: Foldable (ProductForm c1 c2 e)
 
 derive newtype instance bifoldableProductForm :: Bifoldable (ProductForm c1 c2)
 
-instance arbitraryNewtypeProductContext ::
-  ( Arbitrary c1
-  , Arbitrary c2
-  , Arbitrary i1
-  , Arbitrary i2
-  , Arbitrary e1
-  , Arbitrary e2
+derive newtype instance arbitraryProductForm ::
+  ( ArbitraryFormContext (ProductContext c1 c2) i o
+  , Arbitrary (ProductContext c1 c2)
+  , Arbitrary i
+  , Arbitrary e
   , Arbitrary a
-  , Arbitrary b
-  , Coarbitrary o1
-  , Coarbitrary o2
-  , FormContext c1 i1 o1
-  , FormContext c2 i2 o2
-  , IsForm (f1 c1) c1 e1 a
-  , IsForm (f2 c2) c2 e2 b
+  , Coarbitrary o
   ) =>
-  Arbitrary (ProductContext (f1 c1 e1 a) (f2 c2 e2 b)) where
-  arbitrary = map (bimap fromForm fromForm)
-    $ ProductContext <$> arbitrary <*> arbitrary
+  Arbitrary (ProductForm c1 c2 e a)
+
+derive newtype instance coarbitraryProductForm ::
+  ( FormContext (ProductContext c1 c2) i o
+  , Coarbitrary o
+  , Coarbitrary e
+  , Coarbitrary a
+  ) =>
+  Coarbitrary (ProductForm c1 c2 e a)
 
 derive instance eqProductContext :: (Eq c1, Eq c2) => Eq (ProductContext c1 c2)
 derive instance ordProductContext ::
@@ -142,3 +144,50 @@ instance formContextProduct ::
     ProductContext
       (fromForm $ ctx_update i1 $ toForm f1)
       (fromForm $ ctx_update i2 $ toForm f2)
+
+instance arbitraryFormContextProduct ::
+  ( ArbitraryFormContext cl i1 o1
+  , ArbitraryFormContext cr i2 o2
+  , Arbitrary i1
+  , Arbitrary i2
+  , Arbitrary e1
+  , Arbitrary e2
+  , Arbitrary a
+  , Arbitrary b
+  , Coarbitrary o1
+  , Coarbitrary o2
+  , IsForm f1 cl e1 a
+  , IsForm f2 cr e2 b
+  ) =>
+  ArbitraryFormContext
+    (ProductContext (f1 e1 a) (f2 e2 b))
+    (i1 /\ i2)
+    (Result (e1 \/ e2) (a /\ b)) where
+  genBlank =
+    ProductContext
+      <$> (fromForm <$> genBlank)
+      <*> (fromForm <$> genBlank)
+
+instance arbitraryProductContext ::
+  ( ArbitraryFormContext cl i1 o1
+  , ArbitraryFormContext cr i2 o2
+  , Arbitrary i1
+  , Arbitrary i2
+  , Arbitrary e1
+  , Arbitrary e2
+  , Arbitrary a
+  , Arbitrary b
+  , Coarbitrary o1
+  , Coarbitrary o2
+  , IsForm f1 cl e1 a
+  , IsForm f2 cr e2 b
+  ) =>
+  Arbitrary (ProductContext (f1 e1 a) (f2 e2 b)) where
+  arbitrary = arbitraryFormContext
+
+instance coarbitraryProductContext ::
+  ( FormContext (ProductContext c1 c2) i o
+  , Coarbitrary o
+  ) =>
+  Coarbitrary (ProductContext c1 c2) where
+  coarbitrary = coarbitraryFormContext
