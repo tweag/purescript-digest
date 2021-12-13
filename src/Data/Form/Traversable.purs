@@ -1,8 +1,8 @@
 module Data.Form.Traversable
   ( TraversableForm(..)
   , TraversableContext
-  , getItemForm
-  , setItemForm
+  , getIndexForm
+  , setIndexForm
   , traversable
   , traversableValidate
   ) where
@@ -12,6 +12,7 @@ import Prelude
 import Control.Alternative (class Plus)
 import Data.Bifoldable (class Bifoldable)
 import Data.Bifunctor (class Bifunctor)
+import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Foldable (class Foldable)
 import Data.Form
@@ -36,8 +37,9 @@ import Data.Form.Result (Result(..), ignore)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (over, preview, (^?))
+import Data.Lens.AffineTraversal (affineTraversal)
 import Data.Lens.Index (class Index, ix)
-import Data.Maybe (Maybe, fromMaybe)
+import Data.Maybe (Maybe, fromMaybe, maybe)
 import Data.Newtype (class Newtype)
 import Data.NonEmpty (NonEmpty, head, singleton, tail, (:|))
 import Data.Profunctor (lcmap)
@@ -186,32 +188,39 @@ derive newtype instance coarbitraryTraversableForm ::
 -- Helpers
 -------------------------------------------------------------------------------
 
-getItemForm
-  :: forall index t f ctx i e' a' e a
+getIndexForm
+  :: forall index t f ctx e' a' e a
    . IsForm f ctx
-  => FormContext ctx i
   => Index (t (f e' a')) index (f e' a')
   => index
   -> TraversableForm t (f e' a') e a
   -> Maybe (f e' a')
-getItemForm index tf = do
+getIndexForm index tf = do
   currentForm <- preview (ix index) (tail $ unTC $ currentContext tf)
   let current = currentContext currentForm
   let template :| forms = unTC $ initialContext tf
   pure $ updateContext current $ fromMaybe template $ forms ^? ix index
 
-setItemForm
-  :: forall index t f ctx i e' a' e a
+setIndexForm
+  :: forall index t f ctx e' a' e a
    . IsForm f ctx
-  => FormContext ctx i
   => Index (t (f e' a')) index (f e' a')
   => index
   -> f e' a'
   -> TraversableForm t (f e' a') e a
   -> TraversableForm t (f e' a') e a
-setItemForm index f =
+setIndexForm index f =
   updatesContext (go currentContext) <<< loadsContext (go initialContext)
   where
   go getter = overTC \(template :| forms) ->
     template :| over (ix index) (loadContext $ getter f) forms
 
+instance indexTraversableForm ::
+  ( IsForm f ctx
+  , Index (t (f e' a')) index (f e' a')
+  ) =>
+  Index (TraversableForm t (f e' a') e a) index (f e' a') where
+  ix index = affineTraversal set pre
+    where
+    set = flip $ setIndexForm index
+    pre t = maybe (Left t) Right $ getIndexForm index t
