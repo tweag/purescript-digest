@@ -3,9 +3,18 @@ module Test.Data.Form where
 import Prelude
 
 import Data.Foldable (class Foldable)
-import Data.Form (class Form, current, initial, load, save, update)
+import Data.Form
+  ( class FormContext
+  , class IsForm
+  , current
+  , initial
+  , load
+  , save
+  , update
+  )
 import Data.Form.Coproduct (CoproductForm)
 import Data.Form.Product (ProductForm)
+import Data.Form.Record (RecordForm)
 import Data.Form.Traversable (TraversableForm)
 import Data.List (List)
 import Effect.Class (liftEffect)
@@ -22,15 +31,17 @@ import Test.Spec.QuickCheck (quickCheck)
 import Type.Proxy (Proxy(..), Proxy2(..), Proxy3(..))
 
 checkForm
-  :: forall f i
-   . Eq i
+  :: forall f ctx i
+   . IsForm f ctx
+  => FormContext ctx i
+  => Eq ctx
+  => Eq i
   => Eq (f Int String)
   => Eq (f Int A)
   => Show (f Int String)
   => Functor (f Int)
   => Foldable (f Int)
   => Show i
-  => Form f i
   => Arbitrary (f Int String)
   => Arbitrary (f Int A)
   => Coarbitrary (f Int String)
@@ -43,21 +54,25 @@ checkForm p = do
     (Proxy3 :: _ (ProductForm (f Int String) (f Int String)))
   checkForm' "CoproductForm"
     (Proxy3 :: _ (CoproductForm (f Int String) (f Int String)))
+  checkForm' "RecordForm"
+    (Proxy3 :: _ (RecordForm (foo :: f Int String, bar :: f Int String)))
   checkForm' "TraversableForm Array"
     (Proxy3 :: _ (TraversableForm Array (f Int String)))
   checkForm' "TraversableForm List"
     (Proxy3 :: _ (TraversableForm List (f Int String)))
 
 checkForm'
-  :: forall f i
-   . Eq i
+  :: forall f ctx i
+   . IsForm f ctx
+  => FormContext ctx i
+  => Eq ctx
+  => Eq i
   => Eq (f Int String)
   => Eq (f Int A)
   => Show (f Int String)
   => Functor (f Int)
   => Foldable (f Int)
   => Show i
-  => Form f i
   => Arbitrary (f Int String)
   => Arbitrary (f Int A)
   => Coarbitrary (f Int String)
