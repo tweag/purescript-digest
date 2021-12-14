@@ -17,6 +17,7 @@ import Prelude
 
 import Data.Bifoldable (class Bifoldable)
 import Data.Bifunctor (class Bifunctor)
+import Data.Either (Either(..))
 import Data.Eq (class EqRecord)
 import Data.Foldable (class Foldable)
 import Data.Form
@@ -37,7 +38,7 @@ import Data.Form
   , updateContext
   , updatesContext
   )
-import Data.Form.Result (Result(..))
+import Data.Form.Result (Result(..), fromEither)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
 import Data.Newtype (class Newtype)
@@ -57,8 +58,7 @@ import Record.Builder (Builder)
 import Record.Builder as Builder
 import Test.QuickCheck (class Arbitrary, class Coarbitrary, coarbitrary)
 import Test.QuickCheck.Gen (Gen)
-import Type.Prelude (Proxy(..))
-import Type.Proxy (Proxy)
+import Type.Proxy (Proxy(..))
 
 -------------------------------------------------------------------------------
 -- Model
@@ -84,10 +84,10 @@ recordValidate
    . RowToList rf rl
   => FoldlRecord ValidateProp (Result e {}) rl rf (Result e { | r })
   => { | rf }
-  -> ({ | r } -> Result e a)
+  -> ({ | r } -> Either e a)
   -> RecordForm rf e a
 recordValidate rf validate =
-  formValidate (RC rf) $ validate <=< validateRecord <<< unRC
+  formValidate (RC rf) $ fromEither <<< validate <=< validateRecord <<< unRC
   where
   validateRecord = hfoldlWithIndex ValidateProp (Ok {} :: Result e {})
 
@@ -97,7 +97,7 @@ record
   => FoldlRecord ValidateProp (Result e {}) rl rf (Result e { | r })
   => { | rf }
   -> RecordForm rf e { | r }
-record rf = recordValidate rf Ok
+record rf = recordValidate rf Right
 
 -------------------------------------------------------------------------------
 -- Instances

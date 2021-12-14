@@ -8,6 +8,7 @@ import Data.Form
   , current
   , initial
   , load
+  , result
   , update
   )
 import Data.Form.Coproduct
@@ -25,7 +26,8 @@ import Data.Form.Product
   , setSndForm
   )
 import Data.Form.Record (RecordForm, getPropForm, setPropForm)
-import Data.Lens (Lens', lens)
+import Data.Form.Result (_Error, _Ok)
+import Data.Lens (Fold', Lens', lens, to)
 import Data.Symbol (class IsSymbol)
 import Prim.Row as Row
 import Type.Proxy (Proxy)
@@ -71,3 +73,9 @@ propForm
   => Proxy label
   -> Lens' (RecordForm rf e a) (f e' a')
 propForm prop = lens (getPropForm prop) $ flip $ setPropForm prop
+
+output :: forall r f ctx e a. IsForm f ctx => Monoid r => Fold' r (f e a) a
+output = to result <<< _Ok
+
+error :: forall r f ctx e a. IsForm f ctx => Monoid r => Fold' r (f e a) e
+error = to result <<< _Error

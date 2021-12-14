@@ -13,6 +13,7 @@ import Data.Eq (class Eq1)
 import Data.Foldable (class Foldable)
 import Data.Functor.Invariant (class Invariant, imapF)
 import Data.Generic.Rep (class Generic)
+import Data.Lens (Prism, Prism', prism, prism')
 import Data.Maybe (Maybe(..))
 import Data.NonEmpty ((:|))
 import Data.Ord (class Ord1)
@@ -209,3 +210,20 @@ toEither = result (Left Nothing) (Left <<< Just) Right
 ignore :: forall e e' a. Result e a -> Result e' a
 ignore (Ok a) = Ok a
 ignore _ = Unevaluated
+
+_Ok :: forall a e b. Prism (Result e a) (Result e b) a b
+_Ok = prism Ok case _ of
+  Ok a -> Right a
+  Error e -> Left $ Error e
+  Unevaluated -> Left Unevaluated
+
+_Error :: forall a e f. Prism (Result e a) (Result f a) e f
+_Error = prism Error case _ of
+  Error e -> Right e
+  Ok a -> Left $ Ok a
+  Unevaluated -> Left Unevaluated
+
+_Unevaluated :: forall a e. Prism' (Result e a) Unit
+_Unevaluated = prism' (const Unevaluated) case _ of
+  Unevaluated -> Just unit
+  _ -> Nothing

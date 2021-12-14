@@ -1,16 +1,26 @@
 module Data.Form.Text
-  ( TextForm(..)
-  , number
+  ( NumberFormOptional
+  , NumberFormRequired
+  , ParsedForm
+  , ParsedFormOptional
+  , StringForm
+  , StringFormRequired
+  , TextForm(..)
+  , TextFormOptional
+  , TextFormRequired
+  , numberOptional
   , numberRequired
   , text
   , textOptional
   , textParsed
+  , textParsedOptional
   , textRequired
   , textValidate
   ) where
 
 import Prelude
 
+import Control.Alt ((<|>))
 import Data.Bifoldable
   ( class Bifoldable
   , bifoldMap
@@ -42,12 +52,21 @@ import Data.String.NonEmpty.Internal (NonEmptyString)
 import Data.Traversable (traverse)
 import Test.QuickCheck (class Arbitrary, class Coarbitrary)
 import Text.Parsing.Parser (ParseError, Parser, runParser)
+import Text.Parsing.Parser.String (eof)
 
 -------------------------------------------------------------------------------
 -- Model
 -------------------------------------------------------------------------------
 
 newtype TextForm e a = TextForm (Form (Identity String) e a)
+type StringForm e = TextForm e String
+type StringFormRequired e = TextFormRequired e NonEmptyString
+type TextFormOptional e a = TextForm e (Maybe a)
+type TextFormRequired e = TextForm (Maybe e)
+type NumberFormOptional = TextFormOptional Unit Number
+type NumberFormRequired = TextFormRequired Unit Number
+type ParsedFormOptional a = TextFormOptional ParseError a
+type ParsedForm = TextForm ParseError
 
 -------------------------------------------------------------------------------
 -- Constructors
@@ -56,24 +75,28 @@ newtype TextForm e a = TextForm (Form (Identity String) e a)
 textValidate :: forall e a. (String -> Either e a) -> TextForm e a
 textValidate f = formValidate (Identity "") $ fromEither <<< f <<< unwrap
 
-text :: forall e. TextForm e String
+text :: forall e. StringForm e
 text = textValidate Right
 
-textOptional :: forall e a. (String -> Either e a) -> TextForm e (Maybe a)
+textOptional :: forall e a. (String -> Either e a) -> TextFormOptional e a
 textOptional f = textValidate $ traverse f <<< filter (not null) <<< Just <<<
   trim
 
-textParsed :: forall a. Parser String a -> TextForm ParseError a
+textParsedOptional :: forall a. Parser String a -> ParsedFormOptional a
+textParsedOptional parser =
+  textValidate $ flip runParser $ (Nothing <$ eof) <|> (Just <$> parser)
+
+textParsed :: forall a. Parser String a -> ParsedForm a
 textParsed = textValidate <<< flip runParser
 
-textRequired :: forall e. TextForm (Maybe e) NonEmptyString
+textRequired :: forall e. StringFormRequired e
 textRequired = required $ textValidate (Right <<< NES.fromString)
 
-number :: TextForm Unit (Maybe Number)
-number = textOptional $ note unit <<< Number.fromString
+numberOptional :: NumberFormOptional
+numberOptional = textOptional $ note unit <<< Number.fromString
 
-numberRequired :: TextForm (Maybe Unit) Number
-numberRequired = required number
+numberRequired :: NumberFormRequired
+numberRequired = required numberOptional
 
 -------------------------------------------------------------------------------
 -- Instances
@@ -106,7 +129,7 @@ instance arbitraryTextForm ::
   , Arbitrary e
   ) =>
   Arbitrary (TextForm e a) where
-  arbitrary = arbitraryForm $ formValidate
+  arbitrary = arbitraryForm $ const textValidate
 
 derive newtype instance coarbitraryTextForm ::
   ( Coarbitrary e

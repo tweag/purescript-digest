@@ -23,17 +23,17 @@ import Data.Form
   , clear
   , currentContext
   , formValidate
+  , ignoreError
   , initial
   , initialContext
   , load
   , loadContext
   , loadsContext
-  , result
   , save
   , updateContext
   , updatesContext
   )
-import Data.Form.Result (Result(..), ignore)
+import Data.Form.Result (fromEither)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (over, preview, (^?))
@@ -75,14 +75,12 @@ traversableValidate
   => Traversable t
   => IsForm f i
   => f e' a
-  -> (t a -> Result e c)
+  -> (t a -> Either e c)
   -> TraversableForm t (f e' a) e c
 traversableValidate template validate =
   formValidate
     (TC $ singleton template)
-    (validate <=< validateTraversable <<< tail <<< unTC)
-  where
-  validateTraversable = ignore <<< traverse result
+    (fromEither <<< validate <=< traverse ignoreError <<< tail <<< unTC)
 
 traversable
   :: forall t f i e' e a
@@ -91,7 +89,7 @@ traversable
   => IsForm f i
   => f e' a
   -> TraversableForm t (f e' a) e (t a)
-traversable f = traversableValidate f Ok
+traversable f = traversableValidate f Right
 
 -------------------------------------------------------------------------------
 -- Instances

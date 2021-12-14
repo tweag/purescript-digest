@@ -66,7 +66,7 @@ import Data.Bifoldable
   , bifoldrDefault
   )
 import Data.Bifunctor (class Bifunctor, bimap)
-import Data.Either (note)
+import Data.Either (Either, note)
 import Data.Foldable (class Foldable, foldMap, foldlDefault, foldrDefault)
 import Data.Form.Result (Result(..), fromEither, ignore)
 import Data.Form.Result as R
@@ -151,7 +151,8 @@ instance formForm :: IsForm (Form ctx) ctx where
   toForm = identity
   fromForm = identity
 else instance formNewtypeForm ::
-  ( Newtype (f e a) (Form ctx e a)
+  ( Newtype (f e a) (f' e a)
+  , IsForm f' ctx
   ) =>
   IsForm f ctx where
   toForm = unsafeCoerce
@@ -202,7 +203,7 @@ arbitraryForm
   => Arbitrary a
   => Arbitrary e
   => Coarbitrary o
-  => (ctx -> (o -> Result e a) -> f e a)
+  => (ctx -> (o -> Either e a) -> f e a)
   -> Gen (f e a)
 arbitraryForm mkForm = sized \size -> do
   let

@@ -13,6 +13,7 @@ import Prelude
 
 import Data.Bifoldable (class Bifoldable)
 import Data.Bifunctor (class Bifunctor, bimap)
+import Data.Either (Either(..))
 import Data.Foldable (class Foldable)
 import Data.Form
   ( class FormContext
@@ -32,7 +33,7 @@ import Data.Form
   , updateContext
   , updatesContext
   )
-import Data.Form.Result (Result(..))
+import Data.Form.Result (fromEither)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
 import Data.Newtype (class Newtype, unwrap)
@@ -71,10 +72,11 @@ productValidate
   => IsForm g c2
   => f e1 a
   -> g e2 b
-  -> (a /\ b -> Result e c)
+  -> (a /\ b -> Either e c)
   -> ProductForm (f e1 a) (g e2 b) e c
 productValidate f g validate =
-  formValidate (PC (f /\ g)) (validate <=< validateProduct <<< unPC)
+  formValidate (PC (f /\ g))
+    (fromEither <<< validate <=< validateProduct <<< unPC)
   where
   validateProduct = unwrap $ Star ignoreError *** Star ignoreError
 
@@ -85,7 +87,7 @@ product
   => f e1 a
   -> g e2 b
   -> ProductForm (f e1 a) (g e2 b) e (a /\ b)
-product f g = productValidate f g Ok
+product f g = productValidate f g Right
 
 -------------------------------------------------------------------------------
 -- Instances

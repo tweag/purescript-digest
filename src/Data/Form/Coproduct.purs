@@ -37,7 +37,7 @@ import Data.Form
   , updateContext
   , updatesContext
   )
-import Data.Form.Result (Result(..))
+import Data.Form.Result (fromEither)
 import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
 import Data.Newtype (class Newtype, unwrap)
@@ -83,10 +83,11 @@ coproductValidate
   => IsForm g j
   => f e1 a
   -> g e2 b
-  -> (a \/ b -> Result e c)
+  -> (a \/ b -> Either e c)
   -> CoproductForm (f e1 a) (g e2 b) e c
 coproductValidate f g validate =
-  formValidate (CC $ Left (g /\ f)) (validate <=< validateCoproduct <<< unCC)
+  formValidate (CC $ Left (g /\ f))
+    (fromEither <<< validate <=< validateCoproduct <<< unCC)
   where
   validateCoproduct =
     unwrap $ Star (ignoreError <<< extract) +++ Star (ignoreError <<< extract)
@@ -98,7 +99,7 @@ coproduct
   => f e1 a
   -> g e2 b
   -> CoproductForm (f e1 a) (g e2 b) e (a \/ b)
-coproduct f g = coproductValidate f g Ok
+coproduct f g = coproductValidate f g Right
 
 -------------------------------------------------------------------------------
 -- Instances
