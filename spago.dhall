@@ -30,6 +30,7 @@
   , "spec-discovery"
   , "spec-quickcheck"
   , "strings"
+  , "these"
   , "transformers"
   , "tuples"
   , "unsafe-coerce"

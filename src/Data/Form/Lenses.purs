@@ -2,19 +2,22 @@ module Data.Form.Lenses where
 
 import Prelude
 
+import Data.Either (Either)
 import Data.Form
   ( class FormContext
-  , class IsForm
+  , Form
   , current
-  , initial
-  , load
+  , getContext
   , result
+  , setContext
   , update
   )
 import Data.Form.Coproduct
   ( CoproductForm
+  , getCurrentForm
   , getLeftForm
   , getRightForm
+  , setCurrentForm
   , setLeftForm
   , setRightForm
   )
@@ -32,50 +35,38 @@ import Data.Symbol (class IsSymbol)
 import Prim.Row as Row
 import Type.Proxy (Proxy)
 
-_current
-  :: forall f ctx i e a. IsForm f ctx => FormContext ctx i => Lens' (f e a) i
-_current = lens current $ flip update
+context :: forall ctx e a. Lens' (Form ctx e a) ctx
+context = lens getContext $ flip setContext
 
-_initial
-  :: forall f ctx i e a. IsForm f ctx => FormContext ctx i => Lens' (f e a) i
-_initial = lens initial $ flip load
+input :: forall ctx i e a. FormContext ctx i => Lens' (Form ctx e a) i
+input = lens current $ flip update
 
-_fstForm
-  :: forall f ctx g e' a' e a
-   . IsForm f ctx
-  => Lens' (ProductForm (f e' a') g e a) (f e' a')
-_fstForm = lens getFstForm $ flip setFstForm
+fstForm :: forall f g e a. Lens' (ProductForm f g e a) f
+fstForm = context <<< lens getFstForm (flip setFstForm)
 
-_sndForm
-  :: forall f g ctx e' a' e a
-   . IsForm g ctx
-  => Lens' (ProductForm f (g e' a') e a) (g e' a')
-_sndForm = lens getSndForm $ flip setSndForm
+sndForm :: forall f g e a. Lens' (ProductForm f g e a) g
+sndForm = context <<< lens getSndForm (flip setSndForm)
 
-_leftForm
-  :: forall f ctx g e' a' e a
-   . IsForm f ctx
-  => Lens' (CoproductForm (f e' a') g e a) (f e' a')
-_leftForm = lens getLeftForm $ flip setLeftForm
+leftForm :: forall f g e a. Lens' (CoproductForm f g e a) f
+leftForm = context <<< lens getLeftForm (flip setLeftForm)
 
-_rightForm
-  :: forall f g ctx e' a' e a
-   . IsForm g ctx
-  => Lens' (CoproductForm f (g e' a') e a) (g e' a')
-_rightForm = lens getRightForm $ flip setRightForm
+rightForm :: forall f g e a. Lens' (CoproductForm f g e a) g
+rightForm = context <<< lens getRightForm (flip setRightForm)
+
+currentForm :: forall f g e a. Lens' (CoproductForm f g e a) (Either f g)
+currentForm = context <<< lens getCurrentForm (flip setCurrentForm)
 
 propForm
-  :: forall label rf rf' f ctx e' a' e a
-   . IsForm f ctx
-  => IsSymbol label
-  => Row.Cons label (f e' a') rf' rf
+  :: forall label f rf rf' e a
+   . IsSymbol label
+  => Row.Cons label f rf' rf
   => Row.Lacks label rf'
   => Proxy label
-  -> Lens' (RecordForm rf e a) (f e' a')
+  -> Lens' (RecordForm rf e a) f
 propForm prop = lens (getPropForm prop) $ flip $ setPropForm prop
 
-output :: forall r f ctx e a. IsForm f ctx => Monoid r => Fold' r (f e a) a
+output :: forall r ctx e a. Monoid r => Fold' r (Form ctx e a) a
 output = to result <<< _Ok
 
-error :: forall r f ctx e a. IsForm f ctx => Monoid r => Fold' r (f e a) e
+error :: forall r ctx e a. Monoid r => Fold' r (Form ctx e a) e
 error = to result <<< _Error

@@ -1,220 +1,119 @@
 module Data.Form.Product
   ( ProductForm(..)
-  , ProductContext
+  , ProductContext(..)
   , getFstForm
   , getSndForm
   , product
   , productValidate
   , setFstForm
   , setSndForm
+  , getForms
+  , overForms
   ) where
 
 import Prelude
 
-import Data.Bifoldable (class Bifoldable)
-import Data.Bifunctor (class Bifunctor, bimap)
 import Data.Either (Either(..))
-import Data.Foldable (class Foldable)
 import Data.Form
   ( class FormContext
-  , class IsForm
-  , Form(..)
-  , arbitraryForm
+  , Form
   , clear
   , current
-  , currentContext
+  , dirty
   , formValidate
   , ignoreError
-  , initialContext
   , load
-  , loadContext
-  , loadsContext
-  , save
-  , updateContext
-  , updatesContext
+  , update
   )
 import Data.Form.Result (fromEither)
-import Data.Functor.Invariant (class Invariant)
 import Data.Generic.Rep (class Generic)
-import Data.Newtype (class Newtype, unwrap)
-import Data.Profunctor (lcmap)
+import Data.Newtype (unwrap)
 import Data.Profunctor.Star (Star(..))
-import Data.Profunctor.Strong (first, second, (***))
-import Data.Tuple (fst, snd, uncurry)
+import Data.Profunctor.Strong (second, (***))
+import Data.Show.Generic (genericShow)
+import Data.Tuple (curry, fst, snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Test.QuickCheck (class Arbitrary, class Coarbitrary)
 
 -------------------------------------------------------------------------------
 -- Model
 -------------------------------------------------------------------------------
 
-newtype ProductContext f g = PC (f /\ g)
+data ProductContext f g = PC f g
 
-unPC :: forall f g. ProductContext f g -> f /\ g
-unPC (PC t) = t
-
-overPC
-  :: forall f g h j
-   . (f /\ g -> h /\ j)
-  -> ProductContext f g
-  -> ProductContext h j
-overPC f (PC t) = PC $ f t
-
-newtype ProductForm f g e a = ProductForm (Form (ProductContext f g) e a)
+type ProductForm f g = Form (ProductContext f g)
 
 -------------------------------------------------------------------------------
 -- Constructors
 -------------------------------------------------------------------------------
 
 productValidate
-  :: forall f g c1 c2 e1 e2 e a b c
-   . IsForm f c1
-  => IsForm g c2
-  => f e1 a
-  -> g e2 b
+  :: forall c1 c2 e1 e2 e a b c
+   . Form c1 e1 a
+  -> Form c2 e2 b
   -> (a /\ b -> Either e c)
-  -> ProductForm (f e1 a) (g e2 b) e c
+  -> ProductForm (Form c1 e1 a) (Form c2 e2 b) e c
 productValidate f g validate =
-  formValidate (PC (f /\ g))
-    (fromEither <<< validate <=< validateProduct <<< unPC)
+  formValidate (PC f g) (fromEither <<< validate <=< validateProduct)
   where
-  validateProduct = unwrap $ Star ignoreError *** Star ignoreError
+  validateProduct = unwrap (Star ignoreError *** Star ignoreError) <<< getForms
 
 product
-  :: forall f g c1 c2 e1 e2 e a b
-   . IsForm f c1
-  => IsForm g c2
-  => f e1 a
-  -> g e2 b
-  -> ProductForm (f e1 a) (g e2 b) e (a /\ b)
+  :: forall c1 c2 e1 e2 e a b
+   . Form c1 e1 a
+  -> Form c2 e2 b
+  -> ProductForm (Form c1 e1 a) (Form c2 e2 b) e (a /\ b)
 product f g = productValidate f g Right
 
 -------------------------------------------------------------------------------
 -- Instances
 -------------------------------------------------------------------------------
 
-derive instance genericProductForm :: Generic (ProductForm f g e a) _
+derive instance genericProductContext :: Generic (ProductContext f g) _
 
-derive instance newtypeProductForm :: Newtype (ProductForm f g e a) _
-
-derive instance eqProductContext :: (Eq f, Eq g) => Eq (ProductContext f g)
-
-derive instance eqProductForm ::
+derive instance eqProductContext ::
   ( Eq f
   , Eq g
-  , Eq e
-  , Eq a
   ) =>
-  Eq (ProductForm f g e a)
+  Eq (ProductContext f g)
 
-derive instance functorProductForm :: Functor (ProductForm f g e)
-
-derive newtype instance invariantProductForm :: Invariant (ProductForm f g e)
-
-derive newtype instance bifunctorProductForm :: Bifunctor (ProductForm f g)
-
-derive newtype instance foldableProductForm :: Foldable (ProductForm f g e)
-
-derive newtype instance bifoldableProductForm :: Bifoldable (ProductForm f g)
-
-derive newtype instance showProductContext ::
+instance showProductContext ::
   ( Show f
   , Show g
   ) =>
-  Show (ProductContext f g)
-
-derive newtype instance showProductForm ::
-  ( Show f
-  , Show g
-  , Show e
-  , Show a
-  ) =>
-  Show (ProductForm f g e a)
+  Show (ProductContext f g) where
+  show = genericShow
 
 instance formContextProductContext ::
-  ( IsForm f c1
-  , IsForm g c2
-  , FormContext c1 i
+  ( FormContext c1 i
   , FormContext c2 j
   ) =>
-  FormContext (ProductContext (f e1 a) (g e2 b)) (i /\ j) where
-  clearInput = overPC $ bimap (save <<< clear) (save <<< clear)
-  getInput = bimap current current <<< unPC
-  setInput (i /\ j) = overPC $ (load i *** load j)
-
-derive newtype instance arbitraryProductContext ::
-  ( Arbitrary f
-  , Arbitrary g
-  ) =>
-  Arbitrary (ProductContext f g)
-
-instance arbitraryProductForm ::
-  ( IsForm f c1
-  , IsForm g c2
-  , FormContext c1 i
-  , FormContext c2 j
-  , Arbitrary (f e1 a)
-  , Arbitrary (g e2 b)
-  , Arbitrary i
-  , Arbitrary j
-  , Arbitrary t
-  , Arbitrary e
-  , Coarbitrary (f e1 a)
-  , Coarbitrary (g e2 b)
-  , Coarbitrary a
-  , Coarbitrary b
-  ) =>
-  Arbitrary (ProductForm (f e1 a) (g e2 b) e t) where
-  arbitrary = arbitraryForm $ lcmap unPC $ uncurry productValidate
-
-derive newtype instance coarbitraryProductForm ::
-  ( Coarbitrary e
-  , Coarbitrary a
-  ) =>
-  Coarbitrary (ProductForm f g e a)
+  FormContext (ProductContext (Form c1 e1 a) (Form c2 e2 b)) (i /\ j) where
+  clear = overForms $ clear *** clear
+  current = (current *** current) <<< getForms
+  dirty = uncurry (||) <<< (dirty *** dirty) <<< getForms
+  load (i /\ j) = overForms $ load i *** load j
+  update (i /\ j) = overForms $ update i *** update j
 
 -------------------------------------------------------------------------------
 -- Helpers
 -------------------------------------------------------------------------------
 
-getFstForm
-  :: forall f c g e' a' e a
-   . IsForm f c
-  => ProductForm (f e' a') g e a
-  -> f e' a'
-getFstForm pf = updateContext currentFst initialForm
-  where
-  currentFst = currentContext $ fst $ unPC $ currentContext pf
-  initialForm = fst $ unPC $ initialContext pf
+getForms :: forall f g. ProductContext f g -> f /\ g
+getForms (PC f g) = f /\ g
 
-setFstForm
-  :: forall f c g e' a' e a
-   . IsForm f c
-  => f e' a'
-  -> ProductForm (f e' a') g e a
-  -> ProductForm (f e' a') g e a
-setFstForm f =
-  updatesContext (go currentContext) <<< loadsContext (go initialContext)
-  where
-  go getter = overPC $ first (loadContext $ getter f)
+overForms
+  :: forall f g. (f /\ g -> f /\ g) -> ProductContext f g -> ProductContext f g
+overForms f = uncurry PC <<< f <<< getForms
 
-getSndForm
-  :: forall f c g e' a' e a
-   . IsForm g c
-  => ProductForm f (g e' a') e a
-  -> g e' a'
-getSndForm pf = updateContext currentSnd initialForm
-  where
-  currentSnd = currentContext $ snd $ unPC $ currentContext pf
-  initialForm = snd $ unPC $ initialContext pf
+getFstForm :: forall f g. ProductContext f g -> f
+getFstForm = fst <<< getForms
 
-setSndForm
-  :: forall f c g e' a' e a
-   . IsForm g c
-  => g e' a'
-  -> ProductForm f (g e' a') e a
-  -> ProductForm f (g e' a') e a
-setSndForm f =
-  updatesContext (go currentContext) <<< loadsContext (go initialContext)
-  where
-  go getter = overPC $ second (loadContext $ getter f)
+setFstForm :: forall f g. f -> ProductContext f g -> ProductContext f g
+setFstForm = curry $ uncurry PC <<< second getSndForm
+
+getSndForm :: forall f g. ProductContext f g -> g
+getSndForm = snd <<< getForms
+
+setSndForm :: forall f g. g -> ProductContext f g -> ProductContext f g
+setSndForm = curry $ uncurry (flip PC) <<< second getFstForm
+

@@ -1,64 +1,45 @@
 module Data.Form
-  ( Form(..)
-  , arbitraryForm
+  ( Form
   , bindResult
   , class FormContext
-  , class IsForm
   , clear
-  , clearInput
   , collectResults
   , current
-  , currentContext
   , dirty
   , extendResult
   , form'
   , formValidate
-  , fromForm
-  , getInput
+  , getContext
   , ignoreError
   , imapContext
-  , initial
-  , initialContext
   , load
-  , loadContext
-  , loads
-  , loadsContext
-  , mapForm
-  , mapInput
   , mapResult
+  , overContext
+  , overForm
   , peekResult
-  , peekResultContext
   , peeksResult
-  , peeksResultContext
   , required
   , result
-  , runForm
   , save
-  , setInput
-  , toForm
+  , setContext
   , update
-  , updateContext
   , updates
-  , updatesContext
   ) where
 
 import Prelude
 
-import Control.Alt ((<|>))
 import Control.Comonad (extend, extract)
-import Control.Comonad.Env (EnvT(..), ask, runEnvT)
 import Control.Comonad.Store
   ( Store
   , StoreT(..)
   , experiment
-  , peek
   , peeks
   , pos
   , seek
   , seeks
   , store
   )
-import Control.Monad.Gen (frequency, resize, sized)
+import Control.Semigroupoid (composeFlipped)
 import Data.Bifoldable
   ( class Bifoldable
   , bifoldMap
@@ -66,44 +47,39 @@ import Data.Bifoldable
   , bifoldrDefault
   )
 import Data.Bifunctor (class Bifunctor, bimap)
-import Data.Either (Either, note)
+import Data.Either (note)
 import Data.Foldable (class Foldable, foldMap, foldlDefault, foldrDefault)
 import Data.Form.Result (Result(..), fromEither, ignore)
 import Data.Form.Result as R
 import Data.Function (on)
 import Data.Functor.Invariant (class Invariant, imapF)
-import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity(..))
-import Data.Int (toNumber)
 import Data.Maybe (Maybe(..))
-import Data.Newtype (class Newtype, over, unwrap)
-import Data.NonEmpty ((:|))
 import Data.Profunctor (lcmap)
-import Data.Profunctor.Strong ((&&&))
-import Data.Tuple (fst, uncurry)
-import Data.Tuple.Nested ((/\))
-import Test.QuickCheck
-  ( class Arbitrary
-  , class Coarbitrary
-  , arbitrary
-  , coarbitrary
-  )
-import Test.QuickCheck.Gen (Gen, runGen, stateful)
-import Unsafe.Coerce (unsafeCoerce)
+import Data.Profunctor.Strong (second, (&&&))
+import Data.Tuple (snd, uncurry)
+import Data.Tuple.Nested (type (/\), (/\))
+import Test.QuickCheck (class Coarbitrary, coarbitrary)
 
 -------------------------------------------------------------------------------
 -- Model
 -------------------------------------------------------------------------------
 
-newtype Form ctx e a = Form (EnvT ctx (Store ctx) (Result e a))
+newtype Form ctx e a = Form (Store ctx (Result e a))
+
+overForm
+  :: forall ctx ctx' e e' a b
+   . (Store ctx (Result e a) -> Store ctx' (Result e' b))
+  -> Form ctx e a
+  -> Form ctx' e' b
+overForm f = Form <<< f <<< runForm
+
+runForm :: forall ctx e a. Form ctx e a -> Store ctx (Result e a)
+runForm (Form s) = s
 
 -------------------------------------------------------------------------------
 -- Instances
 -------------------------------------------------------------------------------
-
-derive instance genericForm :: Generic (Form ctx e a) _
-
-derive instance newtypeForm :: Newtype (Form ctx e a) _
 
 derive instance functorForm :: Functor (Form ctx e)
 
@@ -124,44 +100,36 @@ instance bifoldableForm :: Bifoldable (Form ctx) where
   bifoldl f = bifoldlDefault f
 
 instance eqForm :: (Eq ctx, Eq (Result e a), Eq a) => Eq (Form ctx e a) where
-  eq = on eq $ map (pos &&& extract) <<< runEnvT <<< runForm
-
-class IsForm f ctx | f -> ctx where
-  toForm :: forall e a. f e a -> Form ctx e a
-  fromForm :: forall e a. Form ctx e a -> f e a
+  eq = on eq $ getContext &&& result
 
 class FormContext ctx i | ctx -> i where
-  clearInput :: ctx -> ctx
-  getInput :: ctx -> i
-  setInput :: i -> ctx -> ctx
+  clear :: ctx -> ctx
+  current :: ctx -> i
+  dirty :: ctx -> Boolean
+  load :: i -> ctx -> ctx
+  update :: i -> ctx -> ctx
 
-mapInput :: forall ctx i. FormContext ctx i => (i -> i) -> ctx -> ctx
-mapInput f ctx = setInput (f $ getInput ctx) ctx
+instance formContextTuple :: (Eq i, Monoid i) => FormContext (i /\ i) i where
+  clear = second $ const mempty
+  current = snd
+  dirty = uncurry (/=)
+  load = const <<< (identity &&& identity)
+  update = second <<< const
 
-mapForm
-  :: forall f g ctx ctx' e e' a b
-   . IsForm f ctx
-  => IsForm g ctx'
-  => (EnvT ctx (Store ctx) (Result e a) -> EnvT ctx' (Store ctx') (Result e' b))
-  -> f e a
-  -> g e' b
-mapForm f = fromForm <<< over Form f <<< toForm
+instance formContextForm :: FormContext ctx i => FormContext (Form ctx e a) i where
+  clear = overContext clear
+  current = current <<< getContext
+  dirty = dirty <<< getContext
+  load = overContext <<< load
+  update = overContext <<< update
 
-instance formForm :: IsForm (Form ctx) ctx where
-  toForm = identity
-  fromForm = identity
-else instance formNewtypeForm ::
-  ( Newtype (f e a) (f' e a)
-  , IsForm f' ctx
-  ) =>
-  IsForm f ctx where
-  toForm = unsafeCoerce
-  fromForm = unsafeCoerce
+updates :: forall i ctx. FormContext ctx i => (i -> i) -> ctx -> ctx
+updates f fm = update (f $ current fm) fm
 
-instance formContextIdentity :: Monoid ctx => FormContext (Identity ctx) ctx where
-  clearInput = const mempty
-  getInput = unwrap
-  setInput = const <<< Identity
+save :: forall ctx i e a. FormContext ctx i => Form ctx e a -> Form ctx e a
+save = uncurry load <<< (current &&& identity)
+
+-- class FormContext ctx i <= IndexedContext index ctx i | ctx -> i where
 
 instance coarbitraryForm ::
   Coarbitrary (Result e a) =>
@@ -176,9 +144,7 @@ instance showForm ::
   Show (Form ctx e a) where
   show f =
     "(Form "
-      <> show (initialContext f)
-      <> " "
-      <> show (currentContext f)
+      <> show (pos $ runForm f)
       <> " "
       <> show (result f)
       <> ")"
@@ -187,210 +153,108 @@ instance showForm ::
 ---- Constructors
 ---------------------------------------------------------------------------------
 
-formValidate
-  :: forall f ctx e a. IsForm f ctx => ctx -> (ctx -> Result e a) -> f e a
-formValidate ctx validate = fromForm $ Form $ EnvT $ ctx /\ store validate ctx
+formValidate :: forall ctx e a. ctx -> (ctx -> Result e a) -> Form ctx e a
+formValidate ctx validate = Form $ store validate ctx
 
-form' :: forall f ctx e. IsForm f ctx => ctx -> f e ctx
+form' :: forall ctx e. ctx -> Form ctx e ctx
 form' ctx = formValidate ctx pure
 
-arbitraryForm
-  :: forall f ctx i o e a
-   . IsForm f ctx
-  => FormContext ctx i
-  => Arbitrary ctx
-  => Arbitrary i
-  => Arbitrary a
-  => Arbitrary e
-  => Coarbitrary o
-  => (ctx -> (o -> Either e a) -> f e a)
-  -> Gen (f e a)
-arbitraryForm mkForm = sized \size -> do
-  let
-    blankForm =
-      mkForm
-        <$> map clearInput arbitrary
-        <*> stateful \s -> pure \o -> fst $ runGen (coarbitrary o arbitrary) s
-    updatedForm =
-      update <$> arbitrary <*> (arbitraryForm mkForm)
-        <|> load <$> arbitrary <*> (arbitraryForm mkForm)
-  frequency
-    $ 2.5 /\ blankForm :| [ toNumber size /\ resize (_ / 2) updatedForm ]
+-- arbitraryForm
+--   :: forall ctx i o e a
+--    . FormContext ctx i
+--   => Arbitrary ctx
+--   => Arbitrary i
+--   => Arbitrary a
+--   => Arbitrary e
+--   => Coarbitrary o
+--   => (ctx -> (o -> Either e a) -> Form ctx e a)
+--   -> Gen (Form ctx e a)
+-- arbitraryForm mkForm = sized \size -> do
+--   let
+--     blankForm =
+--       mkForm
+--         <$> map clearInput arbitrary
+--         <*> stateful \s -> pure \o -> fst $ runGen (coarbitrary o arbitrary) s
+--     updatedForm =
+--       update <$> arbitrary <*> (arbitraryForm mkForm)
+--         <|> load <$> arbitrary <*> (arbitraryForm mkForm)
+--   frequency
+--     $ 2.5 /\ blankForm :| [ toNumber size /\ resize (_ / 2) updatedForm ]
 
 ---------------------------------------------------------------------------------
 ---- Combinators
 ---------------------------------------------------------------------------------
 
 imapContext
-  :: forall f g ctx ctx' e
-   . IsForm f ctx
-  => IsForm g ctx'
-  => (ctx' -> ctx)
+  :: forall ctx ctx' e
+   . (ctx' -> ctx)
   -> (ctx -> ctx')
-  -> f e ~> g e
+  -> Form ctx e ~> Form ctx' e
 imapContext f g =
-  mapForm \(EnvT (init /\ StoreT (Identity validator /\ curr))) ->
-    EnvT $ g init /\ store (lcmap f validator) (g curr)
+  overForm \(StoreT (Identity validator /\ ctx)) ->
+    store (lcmap f validator) (g ctx)
 
 extendResult
-  :: forall f ctx e e' a b
-   . IsForm f ctx
-  => (f e a -> Result e' b)
-  -> f e a
-  -> f e' b
-extendResult f = mapForm $ extend $ f <<< fromForm <<< Form
+  :: forall ctx e e' a b
+   . (Form ctx e a -> Result e' b)
+  -> Form ctx e a
+  -> Form ctx e' b
+extendResult = overForm <<< extend <<< composeFlipped Form
 
 mapResult
-  :: forall f ctx e e' a b
-   . IsForm f ctx
-  => (Result e a -> Result e' b)
-  -> f e a
-  -> f e' b
+  :: forall ctx e e' a b
+   . (Result e a -> Result e' b)
+  -> Form ctx e a
+  -> Form ctx e' b
 mapResult f = extendResult $ f <<< result
 
 bindResult
-  :: forall f ctx e a b. IsForm f ctx => (a -> Result e b) -> f e a -> f e b
+  :: forall ctx e a b. (a -> Result e b) -> Form ctx e a -> Form ctx e b
 bindResult f = extendResult $ f <=< result
 
-required :: forall f ctx e a. IsForm f ctx => f e (Maybe a) -> f (Maybe e) a
+required :: forall ctx e a. Form ctx e (Maybe a) -> Form ctx (Maybe e) a
 required =
   mapResult
     $ R.result Unevaluated (Error <<< Just) (fromEither <<< note Nothing)
 
-loadContext :: forall f ctx e a. IsForm f ctx => ctx -> f e a -> f e a
-loadContext i =
-  mapForm \(EnvT (_ /\ StoreT (Identity validator /\ _))) ->
-    EnvT $ i /\ store validator i
+overContext :: forall ctx e a. (ctx -> ctx) -> Form ctx e a -> Form ctx e a
+overContext = overForm <<< seeks
 
-load
-  :: forall i f ctx e a
-   . IsForm f ctx
-  => FormContext ctx i
-  => i
-  -> f e a
-  -> f e a
-load = loadsContext <<< setInput
-
-loadsContext :: forall f ctx e a. IsForm f ctx => (ctx -> ctx) -> f e a -> f e a
-loadsContext f = uncurry loadContext <<< (f <<< initialContext &&& identity)
-
-loads
-  :: forall i f ctx e a
-   . IsForm f ctx
-  => FormContext ctx i
-  => (i -> i)
-  -> f e a
-  -> f e a
-loads = loadsContext <<< mapInput
-
-updateContext :: forall f ctx e a. IsForm f ctx => ctx -> f e a -> f e a
-updateContext = mapForm <<< seek
-
-update
-  :: forall i f ctx e a
-   . IsForm f ctx
-  => FormContext ctx i
-  => i
-  -> f e a
-  -> f e a
-update = updatesContext <<< setInput
-
-updatesContext
-  :: forall f ctx e a. IsForm f ctx => (ctx -> ctx) -> f e a -> f e a
-updatesContext = mapForm <<< seeks
-
-updates
-  :: forall i f ctx e a
-   . IsForm f ctx
-  => FormContext ctx i
-  => (i -> i)
-  -> f e a
-  -> f e a
-updates = updatesContext <<< mapInput
-
-clear
-  :: forall i f ctx e a
-   . IsForm f ctx
-  => FormContext ctx i
-  => f e a
-  -> f e a
-clear = updatesContext clearInput
-
-save :: forall f ctx e a. IsForm f ctx => f e a -> f e a
-save = uncurry loadContext <<< (currentContext &&& identity)
+setContext :: forall ctx e a. ctx -> Form ctx e a -> Form ctx e a
+setContext = overForm <<< seek
 
 ---------------------------------------------------------------------------------
 ---- Eliminators
 ---------------------------------------------------------------------------------
 
-runForm
-  :: forall f ctx e a
-   . IsForm f ctx
-  => f e a
-  -> EnvT ctx (Store ctx) (Result e a)
-runForm = unwrap <<< toForm
+getContext :: forall ctx e a. Form ctx e a -> ctx
+getContext = pos <<< runForm
 
-current :: forall i f ctx e a. FormContext ctx i => IsForm f ctx => f e a -> i
-current = getInput <<< currentContext
-
-currentContext :: forall f ctx e a. IsForm f ctx => f e a -> ctx
-currentContext = pos <<< runForm
-
-initial :: forall i f ctx e a. FormContext ctx i => IsForm f ctx => f e a -> i
-initial = getInput <<< initialContext
-
-initialContext :: forall f ctx e a. IsForm f ctx => f e a -> ctx
-initialContext = ask <<< runForm
-
-result :: forall f ctx e a. IsForm f ctx => f e a -> Result e a
+result :: forall ctx e a. Form ctx e a -> Result e a
 result = extract <<< runForm
 
-ignoreError :: forall f ctx e e' a. IsForm f ctx => f e a -> Result e' a
+ignoreError :: forall ctx e e' a. Form ctx e a -> Result e' a
 ignoreError = ignore <<< result
 
 peekResult
-  :: forall i f ctx e a
-   . FormContext ctx i
-  => IsForm f ctx
-  => i
-  -> f e a
-  -> Result e a
-peekResult = peeksResultContext <<< setInput
-
-peekResultContext
-  :: forall f ctx e a. IsForm f ctx => ctx -> f e a -> Result e a
-peekResultContext ctx = peek ctx <<< runForm
+  :: forall i ctx e a. FormContext ctx i => i -> Form ctx e a -> Result e a
+peekResult i = peeks (update i) <<< runForm
 
 peeksResult
-  :: forall i f ctx e a
+  :: forall i ctx e a
    . FormContext ctx i
-  => IsForm f ctx
   => (i -> i)
-  -> f e a
+  -> Form ctx e a
   -> Result e a
-peeksResult = peeksResultContext <<< mapInput
-
-peeksResultContext
-  :: forall f ctx e a. IsForm f ctx => (ctx -> ctx) -> f e a -> Result e a
-peeksResultContext f = peeks f <<< runForm
+peeksResult f = peeks (updates f) <<< runForm
 
 collectResults
-  :: forall i f form ctx e a
+  :: forall ctx i e f a
    . Functor f
-  => IsForm form ctx
   => FormContext ctx i
   => (i -> f i)
-  -> form e a
+  -> Form ctx e a
   -> f (Result e a)
 collectResults f = experiment f' <<< runForm
   where
-  f' ctx = flip setInput ctx <$> f (getInput ctx)
-
-dirty
-  :: forall i f ctx e a
-   . FormContext ctx i
-  => IsForm f ctx
-  => Eq i
-  => f e a
-  -> Boolean
-dirty = uncurry notEq <<< (initial &&& current)
+  f' ctx = flip update ctx <$> f (current ctx)
