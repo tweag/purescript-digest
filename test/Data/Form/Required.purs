@@ -63,14 +63,14 @@ derive newtype instance monadAR :: Monad ArbitraryRequired
 derive newtype instance extendAR :: Extend ArbitraryRequired
 
 instance coarbitraryAR :: Coarbitrary e => Coarbitrary (ArbitraryRequired e) where
-  coarbitrary (AR Missing) = perturbGen 1.0
-  coarbitrary (AR (Invalid a)) = perturbGen 2.0 <<< coarbitrary a
+  coarbitrary (AR Absent) = perturbGen 1.0
+  coarbitrary (AR (Present a)) = perturbGen 2.0 <<< coarbitrary a
 
 instance arbitraryAR :: Arbitrary e => Arbitrary (ArbitraryRequired e) where
   arbitrary =
     frequency
-      $ Tuple 0.1 (pure (AR Missing))
-          :| [ Tuple 0.9 (AR <<< Invalid <$> arbitrary) ]
+      $ Tuple 0.1 (pure (AR Absent))
+          :| [ Tuple 0.9 (AR <<< Present <$> arbitrary) ]
 
 spec :: Spec Unit
 spec = do

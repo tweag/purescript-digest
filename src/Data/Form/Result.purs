@@ -205,6 +205,11 @@ fromEither = either Error Ok
 toEither :: forall e. Result e ~> Either (Maybe e)
 toEither = result (Left Nothing) (Left <<< Just) Right
 
+-- | Turns a `Maybe` into a `Result`.
+note :: forall e. e -> Maybe ~> Result e
+note e Nothing = Error e
+note _ (Just a) = Ok a
+
 -- | Ignore any errors in the first result by converting them to an
 -- | `Unevaluated`.
 ignore :: forall e e' a. Result e a -> Result e' a

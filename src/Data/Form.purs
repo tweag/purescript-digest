@@ -1,260 +1,338 @@
 module Data.Form
-  ( Form
-  , bindResult
+  ( Current
+  , Form
+  , FormF
+  , FormT(..)
+  , FormV
+  , ProformT(..)
   , class FormContext
-  , clear
-  , collectResults
+  , class Requireable
+  , class ToStar
+  , class UpdateRecord
   , current
-  , dirty
-  , extendResult
-  , form'
-  , formValidate
-  , getContext
-  , ignoreError
-  , imapContext
-  , load
-  , mapResult
-  , overContext
-  , overForm
-  , peekResult
-  , peeksResult
+  , extendF
+  , extractF
+  , form
+  , formEmpty
+  , formEmptyF
+  , formEmptyV
+  , formF
+  , formV
+  , hoistFormP
+  , hoistFormW
+  , mapFormT
+  , peekF
+  , peeksF
+  , require
   , required
-  , result
-  , save
-  , setContext
+  , requiredV
+  , runForm
+  , runFormF
+  , runFormT
+  , seekForm
+  , seeksForm
+  , toStar
   , update
+  , updateRecord
   , updates
   ) where
 
 import Prelude
 
-import Control.Comonad (extend, extract)
-import Control.Comonad.Store
-  ( Store
-  , StoreT(..)
-  , experiment
-  , peeks
-  , pos
-  , seek
-  , seeks
-  , store
-  )
-import Control.Semigroupoid (composeFlipped)
-import Data.Bifoldable
-  ( class Bifoldable
-  , bifoldMap
-  , bifoldlDefault
-  , bifoldrDefault
-  )
-import Data.Bifunctor (class Bifunctor, bimap)
-import Data.Either (note)
-import Data.Foldable (class Foldable, foldMap, foldlDefault, foldrDefault)
-import Data.Form.Result (Result(..), fromEither, ignore)
-import Data.Form.Result as R
-import Data.Function (on)
+import Control.Bind (bindFlipped)
+import Control.Comonad (class Comonad, class Extend, extract, (=>>))
+import Control.Comonad.Store (class ComonadStore)
+import Control.Monad.Error.Class (throwError)
+import Data.Array.NonEmpty (NonEmptyArray)
+import Data.Array.NonEmpty as NA
+import Data.Bifunctor (lmap)
+import Data.Either (Either)
+import Data.Form.Required (Required(..))
 import Data.Functor.Invariant (class Invariant, imapF)
 import Data.Identity (Identity(..))
+import Data.List (List)
+import Data.List.NonEmpty (NonEmptyList)
+import Data.List.NonEmpty as NL
 import Data.Maybe (Maybe(..))
-import Data.Profunctor (lcmap)
-import Data.Profunctor.Strong (second, (&&&))
-import Data.Tuple (snd, uncurry)
+import Data.Newtype (class Newtype, over, unwrap)
+import Data.Profunctor (class Profunctor, arr)
+import Data.Profunctor.Star (Star(..))
+import Data.Profunctor.Strong ((***))
+import Data.Set (Set)
+import Data.Set.NonEmpty (NonEmptySet)
+import Data.Set.NonEmpty as NSet
+import Data.String.NonEmpty (NonEmptyString)
+import Data.String.NonEmpty as NS
+import Data.Symbol (class IsSymbol)
+import Data.These (These, both)
+import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Test.QuickCheck (class Coarbitrary, coarbitrary)
+import Heterogeneous.Mapping (class HMap, class Mapping, hmap)
+import Prim.Row as Row
+import Prim.RowList (class RowToList, RowList)
+import Prim.RowList as RL
+import Record as Record
+import Record.Builder (Builder)
+import Record.Builder as Builder
+import Type.Proxy (Proxy(..))
 
 -------------------------------------------------------------------------------
 -- Model
 -------------------------------------------------------------------------------
 
-newtype Form ctx e a = Form (Store ctx (Result e a))
+data FormT :: (Type -> Type -> Type) -> Type -> (Type -> Type) -> Type -> Type
+data FormT p s w a = FormT (w (p s a)) s
 
-overForm
-  :: forall ctx ctx' e e' a b
-   . (Store ctx (Result e a) -> Store ctx' (Result e' b))
-  -> Form ctx e a
-  -> Form ctx' e' b
-overForm f = Form <<< f <<< runForm
+newtype ProformT p w s a = ProformT (FormT p s w a)
 
-runForm :: forall ctx e a. Form ctx e a -> Store ctx (Result e a)
-runForm (Form s) = s
+type Form s = FormT (->) s Identity
+type FormF f s = FormT (Star f) s Identity
+type FormV e s a = FormF (Either e) s a
 
 -------------------------------------------------------------------------------
 -- Instances
 -------------------------------------------------------------------------------
 
-derive instance functorForm :: Functor (Form ctx e)
+derive instance newtypeFormT :: Newtype (ProformT p w s a) _
 
-instance bifunctorForm :: Bifunctor (Form ctx) where
-  bimap f g = mapResult $ bimap f g
+derive instance functorFormT ::
+  ( Functor w
+  , Functor (p s)
+  ) =>
+  Functor (FormT p s w)
 
-instance invariantForm :: Invariant (Form ctx e) where
+derive instance functorProformT ::
+  ( Functor w
+  , Functor (p s)
+  ) =>
+  Functor (ProformT p w s)
+
+instance invariantFormT :: (Functor w, Functor (p s)) => Invariant (FormT p s w) where
   imap = imapF
 
-instance foldableForm :: Foldable (Form ctx e) where
-  foldMap m = foldMap m <<< result
-  foldr m = foldrDefault m
-  foldl m = foldlDefault m
-
-instance bifoldableForm :: Bifoldable (Form ctx) where
-  bifoldMap f g = bifoldMap f g <<< result
-  bifoldr f = bifoldrDefault f
-  bifoldl f = bifoldlDefault f
-
-instance eqForm :: (Eq ctx, Eq (Result e a), Eq a) => Eq (Form ctx e a) where
-  eq = on eq $ getContext &&& result
-
-class FormContext ctx i | ctx -> i where
-  clear :: ctx -> ctx
-  current :: ctx -> i
-  dirty :: ctx -> Boolean
-  load :: i -> ctx -> ctx
-  update :: i -> ctx -> ctx
-
-instance formContextTuple :: (Eq i, Monoid i) => FormContext (i /\ i) i where
-  clear = second $ const mempty
-  current = snd
-  dirty = uncurry (/=)
-  load = const <<< (identity &&& identity)
-  update = second <<< const
-
-instance formContextForm :: FormContext ctx i => FormContext (Form ctx e a) i where
-  clear = overContext clear
-  current = current <<< getContext
-  dirty = dirty <<< getContext
-  load = overContext <<< load
-  update = overContext <<< update
-
-updates :: forall i ctx. FormContext ctx i => (i -> i) -> ctx -> ctx
-updates f fm = update (f $ current fm) fm
-
-save :: forall ctx i e a. FormContext ctx i => Form ctx e a -> Form ctx e a
-save = uncurry load <<< (current &&& identity)
-
--- class FormContext ctx i <= IndexedContext index ctx i | ctx -> i where
-
-instance coarbitraryForm ::
-  Coarbitrary (Result e a) =>
-  Coarbitrary (Form ctx e a) where
-  coarbitrary = coarbitrary <<< result
-
-instance showForm ::
-  ( Show (Result e a)
-  , Show ctx
-  , Show a
+derive newtype instance invariantProformT ::
+  ( Functor w
+  , Functor (p s)
   ) =>
-  Show (Form ctx e a) where
-  show f =
-    "(Form "
-      <> show (pos $ runForm f)
-      <> " "
-      <> show (result f)
-      <> ")"
+  Invariant (ProformT p w s)
+
+instance extendFormT ::
+  ( Category p
+  , Functor (p s)
+  , Profunctor p
+  , Extend w
+  ) =>
+  Extend (FormT p s w) where
+  extend f (FormT w s) = FormT (w =>> (\w' -> arr $ f <<< FormT w')) s
+
+instance comonadFormT :: Comonad w => Comonad (FormT (->) s w) where
+  extract (FormT w s) = extract w s
+
+instance comonadStoreFormT :: Comonad w => ComonadStore s (FormT (->) s w) where
+  pos (FormT _ s) = s
+  peek s (FormT w _) = extract w s
+
+instance semigroupoidProformT ::
+  ( Semigroupoid p
+  , Comonad w
+  , Bind w
+  ) =>
+  Semigroupoid (ProformT p w) where
+  compose (ProformT (FormT w _)) (ProformT (FormT x s)) =
+    ProformT $ FormT
+      (join $ x =>> \x' -> w =>> \w' -> extract w' <<< extract x')
+      s
+
+class FormContext s i | s -> i where
+  current :: s -> i
+  update :: i -> s -> s
+
+instance formContextIdentity :: FormContext (Identity a) a where
+  current = unwrap
+  update = const <<< Identity
+
+instance formContextForm :: FormContext s i => FormContext (FormT p s w a) i where
+  current (FormT _ s) = current s
+  update i (FormT w s) = FormT w $ update i s
+
+instance formContextTuple ::
+  ( FormContext s i
+  , FormContext t j
+  ) =>
+  FormContext (s /\ t) (i /\ j) where
+  current = current *** current
+  update (i /\ j) = update i *** update j
+
+data Current = Current
+
+instance mappingCurrent :: FormContext s i => Mapping Current s i where
+  mapping Current = current
+
+instance formContextRecord ::
+  ( RowToList ri rli
+  , RowToList rs rls
+  , UpdateRecord rli rls ri rs
+  , HMap Current { | rs } { | ri }
+  ) =>
+  FormContext { | rs } { | ri } where
+  current = hmap Current
+  update = Builder.build <<< updateRecord (Proxy :: _ rli) (Proxy :: _ rls)
+
+class UpdateRecord
+  :: RowList Type -> RowList Type -> Row Type -> Row Type -> Constraint
+class UpdateRecord rli rls ri rs | rli -> ri, rls -> rs where
+  updateRecord
+    :: Proxy rli -> Proxy rls -> { | ri } -> Builder { | rs } { | rs }
+
+instance updateRecordNil :: UpdateRecord RL.Nil RL.Nil ri rs where
+  updateRecord _ _ _ = identity
+
+instance updateRecordCons ::
+  ( IsSymbol lbl
+  , UpdateRecord rli rls ri rs
+  , Row.Cons lbl i ri' ri
+  , Row.Cons lbl s rs' rs
+  , FormContext s i
+  ) =>
+  UpdateRecord (RL.Cons lbl i rli) (RL.Cons lbl s rls) ri rs where
+  updateRecord _ _ ri =
+    Builder.modify prop (update $ Record.get prop ri)
+      <<< updateRecord (Proxy :: _ rli) (Proxy :: _ rls) ri
+    where
+    prop = Proxy :: _ lbl
+
+updates :: forall s i. FormContext s i => (i -> i) -> s -> s
+updates f s = update (f $ current s) s
 
 ---------------------------------------------------------------------------------
 ---- Constructors
 ---------------------------------------------------------------------------------
 
-formValidate :: forall ctx e a. ctx -> (ctx -> Result e a) -> Form ctx e a
-formValidate ctx validate = Form $ store validate ctx
+form :: forall s a. (s -> a) -> s -> Form s a
+form = FormT <<< Identity
 
-form' :: forall ctx e. ctx -> Form ctx e ctx
-form' ctx = formValidate ctx pure
+formEmpty :: forall s a. Monoid s => (s -> a) -> Form s a
+formEmpty p = form p mempty
 
--- arbitraryForm
---   :: forall ctx i o e a
---    . FormContext ctx i
---   => Arbitrary ctx
---   => Arbitrary i
---   => Arbitrary a
---   => Arbitrary e
---   => Coarbitrary o
---   => (ctx -> (o -> Either e a) -> Form ctx e a)
---   -> Gen (Form ctx e a)
--- arbitraryForm mkForm = sized \size -> do
---   let
---     blankForm =
---       mkForm
---         <$> map clearInput arbitrary
---         <*> stateful \s -> pure \o -> fst $ runGen (coarbitrary o arbitrary) s
---     updatedForm =
---       update <$> arbitrary <*> (arbitraryForm mkForm)
---         <|> load <$> arbitrary <*> (arbitraryForm mkForm)
---   frequency
---     $ 2.5 /\ blankForm :| [ toNumber size /\ resize (_ / 2) updatedForm ]
+formF :: forall f s a. (s -> f a) -> s -> FormF f s a
+formF = FormT <<< Identity <<< Star
+
+formEmptyF :: forall f s a. Monoid s => (s -> f a) -> FormF f s a
+formEmptyF p = formF p mempty
+
+formV :: forall e s a. (s -> Either e a) -> s -> FormV e s a
+formV = FormT <<< Identity <<< Star
+
+formEmptyV :: forall e s a. Monoid s => (s -> Either e a) -> FormV e s a
+formEmptyV p = formV p mempty
 
 ---------------------------------------------------------------------------------
 ---- Combinators
 ---------------------------------------------------------------------------------
 
-imapContext
-  :: forall ctx ctx' e
-   . (ctx' -> ctx)
-  -> (ctx -> ctx')
-  -> Form ctx e ~> Form ctx' e
-imapContext f g =
-  overForm \(StoreT (Identity validator /\ ctx)) ->
-    store (lcmap f validator) (g ctx)
+class ToStar :: (Type -> Type -> Type) -> (Type -> Type) -> Constraint
+class ToStar p f | p -> f where
+  toStar :: forall s. p s ~> Star f s
 
-extendResult
-  :: forall ctx e e' a b
-   . (Form ctx e a -> Result e' b)
-  -> Form ctx e a
-  -> Form ctx e' b
-extendResult = overForm <<< extend <<< composeFlipped Form
+instance toStarFunction :: Applicative f => ToStar (->) f where
+  toStar = Star <<< map pure
 
-mapResult
-  :: forall ctx e e' a b
-   . (Result e a -> Result e' b)
-  -> Form ctx e a
-  -> Form ctx e' b
-mapResult f = extendResult $ f <<< result
+instance toStarStar :: ToStar (Star f) f where
+  toStar = identity
 
-bindResult
-  :: forall ctx e a b. (a -> Result e b) -> Form ctx e a -> Form ctx e b
-bindResult f = extendResult $ f <=< result
+class Requireable a' a | a' -> a where
+  require :: forall e. a' -> Either (Required e) a
 
-required :: forall ctx e a. Form ctx e (Maybe a) -> Form ctx (Maybe e) a
-required =
-  mapResult
-    $ R.result Unevaluated (Error <<< Just) (fromEither <<< note Nothing)
+instance requireableIdentity :: Requireable (Identity a) a where
+  require = pure <<< unwrap
 
-overContext :: forall ctx e a. (ctx -> ctx) -> Form ctx e a -> Form ctx e a
-overContext = overForm <<< seeks
+instance requireableMaybe :: Requireable (Maybe a) a where
+  require Nothing = throwError Absent
+  require (Just a) = pure a
 
-setContext :: forall ctx e a. ctx -> Form ctx e a -> Form ctx e a
-setContext = overForm <<< seek
+instance requireableString :: Requireable String NonEmptyString where
+  require = require <<< NS.fromString
 
----------------------------------------------------------------------------------
----- Eliminators
----------------------------------------------------------------------------------
+instance requireableArray :: Requireable (Array a) (NonEmptyArray a) where
+  require = require <<< NA.fromArray
 
-getContext :: forall ctx e a. Form ctx e a -> ctx
-getContext = pos <<< runForm
+instance requireableList :: Requireable (List a) (NonEmptyList a) where
+  require = require <<< NL.fromList
 
-result :: forall ctx e a. Form ctx e a -> Result e a
-result = extract <<< runForm
+instance requireableSet :: Requireable (Set a) (NonEmptySet a) where
+  require = require <<< NSet.fromSet
 
-ignoreError :: forall ctx e e' a. Form ctx e a -> Result e' a
-ignoreError = ignore <<< result
+instance requireableThese :: Requireable (These a b) (Tuple a b) where
+  require = require <<< both
 
-peekResult
-  :: forall i ctx e a. FormContext ctx i => i -> Form ctx e a -> Result e a
-peekResult i = peeks (update i) <<< runForm
+mapFormT
+  :: forall p q s w x a b
+   . (w (p s a) -> x (q s b))
+  -> FormT p s w a
+  -> FormT q s x b
+mapFormT t (FormT w a) = FormT (t w) a
 
-peeksResult
-  :: forall i ctx e a
-   . FormContext ctx i
-  => (i -> i)
-  -> Form ctx e a
-  -> Result e a
-peeksResult f = peeks (updates f) <<< runForm
+hoistFormW
+  :: forall p s w x
+   . w ~> x
+  -> FormT p s w ~> FormT p s x
+hoistFormW = mapFormT
 
-collectResults
-  :: forall ctx i e f a
-   . Functor f
-  => FormContext ctx i
-  => (i -> f i)
-  -> Form ctx e a
-  -> f (Result e a)
-collectResults f = experiment f' <<< runForm
-  where
-  f' ctx = flip update ctx <$> f (current ctx)
+hoistFormP
+  :: forall p q s w
+   . Functor w
+  => p s ~> q s
+  -> FormT p s w ~> FormT q s w
+hoistFormP t = mapFormT $ map t
+
+liftF
+  :: forall f s w a. Functor w => FormT (->) s w (f a) -> FormT (Star f) s w a
+liftF = mapFormT $ map Star
+
+required
+  :: forall s e w a' a
+   . Functor w
+  => Requireable a' a
+  => FormT (->) s w a'
+  -> FormT (Star (Either (Required e))) s w a
+required = liftF <<< map require
+
+requiredV
+  :: forall s e w a' a
+   . Functor w
+  => Requireable a' a
+  => FormT (Star (Either e)) s w a'
+  -> FormT (Star (Either (Required e))) s w a
+requiredV =
+  mapFormT
+    $ map
+    $ over Star (map (bindFlipped require <<< lmap Present)) <<< toStar
+
+runForm :: forall s a. Form s a -> Tuple (s -> a) s
+runForm (FormT (Identity f) s) = Tuple f s
+
+runFormF :: forall f s a. FormF f s a -> Tuple (s -> f a) s
+runFormF (FormT (Identity (Star f)) s) = Tuple f s
+
+runFormT :: forall p s w a. FormT p s w a -> Tuple (w (p s a)) s
+runFormT (FormT w s) = Tuple w s
+
+extendF :: forall g f s a b. (FormF f s a -> g b) -> FormF f s a -> FormF g s b
+extendF k (FormT (Identity (Star f)) s) = FormT
+  (Identity $ Star $ k <<< formF f)
+  s
+
+extractF :: forall s f a. FormF f s a -> f a
+extractF (FormT (Identity (Star f)) s) = f s
+
+peekF :: forall s f a. s -> FormF f s a -> f a
+peekF s (FormT (Identity (Star f)) _) = f s
+
+peeksF :: forall s f a. (s -> s) -> FormF f s a -> f a
+peeksF k (FormT (Identity (Star f)) s) = f $ k s
+
+seekForm :: forall p s w a. s -> FormT p s w a -> FormT p s w a
+seekForm s (FormT w _) = FormT w s
+
+seeksForm :: forall p s w a. (s -> s) -> FormT p s w a -> FormT p s w a
+seeksForm f (FormT w s) = FormT w $ f s

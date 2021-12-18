@@ -1,211 +1,113 @@
 module Data.Form.Record
-  ( Clear
-  , RecordForm(..)
-  , Current
-  , Dirty
-  , SetInput(..)
-  , RecordContext
-  , ValidateProp
-  , getPropForm
+  ( Extract
+  , RecordForm
+  , RecordFormF
+  , RecordFormV
+  , class ExtractFRecord
+  , extractFRecord
   , record
-  , recordValidate
-  , setPropForm
+  , recordF
+  , recordV
   ) where
 
 import Prelude
 
-import Data.Either (Either(..))
-import Data.Eq (class EqRecord)
-import Data.Form
-  ( class FormContext
-  , Form
-  , clear
-  , current
-  , dirty
-  , formValidate
-  , getContext
-  , ignoreError
-  , load
-  , overContext
-  , update
-  )
-import Data.Form.Result (Result(..), fromEither)
-import Data.Show (class ShowRecordFields)
+import Control.Comonad (class Comonad, extract)
+import Data.Bifunctor (lmap)
+import Data.Either (Either)
+import Data.Form (Form, FormF, FormV, extractF, form, formF)
 import Data.Symbol (class IsSymbol)
-import Heterogeneous.Folding
-  ( class Folding
-  , class FoldingWithIndex
-  , class FoldlRecord
-  , ConstFolding
-  , hfoldl
-  , hfoldlWithIndex
-  )
 import Heterogeneous.Mapping (class HMap, class Mapping, hmap)
 import Prim.Row as Row
-import Prim.RowList (class RowToList)
+import Prim.RowList (class RowToList, RowList)
+import Prim.RowList as RL
 import Record as Record
 import Record.Builder (Builder)
 import Record.Builder as Builder
-import Type.Proxy (Proxy)
+import Type.Proxy (Proxy(..))
 
 -------------------------------------------------------------------------------
 -- Model
 -------------------------------------------------------------------------------
 
-newtype RecordContext r = RC { | r }
+data Extract = Extract
 
-unRC :: forall r. RecordContext r -> { | r }
-unRC (RC t) = t
-
-overRC
-  :: forall r r'. ({ | r } -> { | r' }) -> RecordContext r -> RecordContext r'
-overRC f (RC t) = RC $ f t
-
-type RecordForm rf = Form (RecordContext rf)
+type RecordForm rs = Form { | rs }
+type RecordFormF f rs a = FormF f { | rs } a
+type RecordFormV e rs a = FormV e { | rs } a
 
 -------------------------------------------------------------------------------
--- Constructors
+-- Combinators
 -------------------------------------------------------------------------------
-
-recordValidate
-  :: forall rl rf e r a
-   . RowToList rf rl
-  => FoldlRecord ValidateProp (Result e {}) rl rf (Result e { | r })
-  => { | rf }
-  -> ({ | r } -> Either e a)
-  -> RecordForm rf e a
-recordValidate rf validate =
-  formValidate (RC rf) $ fromEither <<< validate <=< validateRecord <<< unRC
-  where
-  validateRecord = hfoldlWithIndex ValidateProp (Ok {} :: Result e {})
 
 record
-  :: forall rl rf e r
-   . RowToList rf rl
-  => FoldlRecord ValidateProp (Result e {}) rl rf (Result e { | r })
-  => { | rf }
-  -> RecordForm rf e { | r }
-record rf = recordValidate rf Right
+  :: forall rs ra
+   . HMap Extract { | rs } { | ra }
+  => { | rs }
+  -> RecordForm rs { | ra }
+record = form $ hmap Extract
 
--------------------------------------------------------------------------------
--- Instances
--------------------------------------------------------------------------------
+recordF
+  :: forall rl f rs ra
+   . Functor f
+  => RowToList rs rl
+  => ExtractFRecord rl f rs ra
+  => { | rs }
+  -> RecordFormF f rs { | ra }
+recordF rs =
+  formF
+    (map (flip Builder.build {}) <<< extractFRecord (Proxy :: _ rl))
+    rs
 
-derive instance eqRecordContext ::
-  ( RowToList rf rl
-  , EqRecord rl rf
+recordV
+  :: forall rl rs ra
+   . RowToList rs rl
+  => ExtractFRecord rl (Either Unit) rs ra
+  => { | rs }
+  -> RecordFormV Unit rs { | ra }
+recordV = recordF
+
+instance mappingExtract :: Comonad w => Mapping Extract (w a) a where
+  mapping Extract = extract
+
+class ExtractFRecord (rl :: RowList Type) f rs ra | rl -> f rs ra where
+  extractFRecord :: Proxy rl -> { | rs } -> f (Builder {} { | ra })
+
+instance extractFRecordNil :: Applicative f => ExtractFRecord RL.Nil f rs () where
+  extractFRecord _ _ = pure identity
+
+instance extractFRecordConsEither ::
+  ( IsSymbol lbl
+  , ExtractFRecord rl (Either Unit) rs ra'
+  , Row.Cons lbl (FormV e s a) rs' rs
+  , Row.Cons lbl a ra' ra
+  , Row.Lacks lbl ra'
   ) =>
-  Eq (RecordContext rf)
+  ExtractFRecord (RL.Cons lbl (FormV e s a) rl) (Either Unit) rs ra where
+  extractFRecord _ rs =
+    compose
+      <$>
+        ( map (Builder.insert prop)
+            $ lmap (const unit)
+            $ extractF
+            $ Record.get prop rs
+        )
+      <*> extractFRecord (Proxy :: _ rl) rs
+    where
+    prop = Proxy :: _ lbl
 
-derive newtype instance showRecordContext ::
-  ( RowToList rf rl
-  , ShowRecordFields rl rf
+else instance extractFRecordCons ::
+  ( Apply f
+  , IsSymbol lbl
+  , ExtractFRecord rl f rs ra'
+  , Row.Cons lbl (FormF f s a) rs' rs
+  , Row.Cons lbl a ra' ra
+  , Row.Lacks lbl ra'
   ) =>
-  Show (RecordContext rf)
-
-data ValidateProp = ValidateProp
-
-instance foldingWithIndexValidateProp ::
-  ( IsSymbol label
-  , Row.Lacks label r'
-  , Row.Cons label a r' r
-  ) =>
-  FoldingWithIndex ValidateProp
-    (Proxy label)
-    (Result e { | r' })
-    (Form ctx e' a)
-    (Result e { | r }) where
-  foldingWithIndex ValidateProp label acc f =
-    Record.insert label <$> ignoreError f <*> acc
-
-data Clear = Clear
-
-instance mappingClear ::
-  ( FormContext ctx i
-  ) =>
-  Mapping Clear (Form ctx e a) (Form ctx e a) where
-  mapping Clear = clear
-
-data Current = Current
-
-instance mappingCurrent ::
-  ( FormContext ctx i
-  ) =>
-  Mapping Current (Form ctx e a) i where
-  mapping Current = current
-
-data SetInput = Load | Update
-
-instance foldingWithIndexSetInput ::
-  ( IsSymbol label
-  , FormContext ctx i
-  , Row.Cons label (Form ctx e a) rf' rf
-  ) =>
-  FoldingWithIndex
-    SetInput
-    (Proxy label)
-    (Builder { | rf } { | rf })
-    i
-    (Builder { | rf } { | rf }) where
-  foldingWithIndex Load label builder i =
-    Builder.modify label (load i) <<< builder
-  foldingWithIndex Update label builder i =
-    Builder.modify label (update i) <<< builder
-
-data Dirty = Dirty
-
-instance foldingDirty ::
-  ( FormContext ctx i
-  ) =>
-  Folding Dirty Boolean ctx Boolean where
-  folding Dirty true = const true
-  folding Dirty _ = dirty
-
-instance formContextRecordContext ::
-  ( RowToList rf rlf
-  , RowToList ri rli
-  , HMap Clear { | rf } { | rf }
-  , HMap Current { | rf } { | ri }
-  , FoldlRecord (ConstFolding Dirty) Boolean rlf rf Boolean
-  , FoldlRecord
-      SetInput
-      (Builder { | rf } { | rf })
-      rli
-      ri
-      (Builder { | rf } { | rf })
-  ) =>
-  FormContext (RecordContext rf) { | ri } where
-  clear = overRC $ hmap Clear
-  current = hmap Current <<< unRC
-  dirty = hfoldl Dirty false <<< unRC
-  load = overRC
-    <<< Builder.build
-    <<< hfoldlWithIndex Load (identity :: Builder { | rf } { | rf })
-  update = overRC
-    <<< Builder.build
-    <<< hfoldlWithIndex Update (identity :: Builder { | rf } { | rf })
-
--------------------------------------------------------------------------------
--- Helpers
--------------------------------------------------------------------------------
-
-getPropForm
-  :: forall label rf rf' f e a
-   . IsSymbol label
-  => Row.Cons label f rf' rf
-  => Row.Lacks label rf'
-  => Proxy label
-  -> RecordForm rf e a
-  -> f
-getPropForm label = Record.get label <<< unRC <<< getContext
-
-setPropForm
-  :: forall label rf rf' f e a
-   . IsSymbol label
-  => Row.Cons label f rf' rf
-  => Row.Lacks label rf'
-  => Proxy label
-  -> f
-  -> RecordForm rf e a
-  -> RecordForm rf e a
-setPropForm label = overContext <<< overRC <<< Record.set label
+  ExtractFRecord (RL.Cons lbl (FormF f s a) rl) f rs ra where
+  extractFRecord _ rs =
+    compose
+      <$> (map (Builder.insert prop) $ extractF $ Record.get prop rs)
+      <*> extractFRecord (Proxy :: _ rl) rs
+    where
+    prop = Proxy :: _ lbl

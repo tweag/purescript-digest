@@ -1,37 +1,18 @@
-module Data.Form.Text
-  ( NumberFormOptional
-  , NumberFormRequired
-  , ParsedForm
-  , ParsedFormOptional
-  , StringForm
-  , StringFormRequired
-  , TextForm(..)
-  , TextFormOptional
-  , TextFormRequired
-  , numberOptional
-  , numberRequired
-  , text
-  , textOptional
-  , textParsed
-  , textParsedOptional
-  , textRequired
-  , textValidate
-  ) where
+module Data.Form.Text where
 
 import Prelude
 
 import Control.Alt ((<|>))
-import Data.Either (Either(..), note)
+import Control.Semigroupoid (composeFlipped)
+import Data.Either (Either, note)
 import Data.Filterable (filter)
-import Data.Form (Form, current, formValidate, required)
-import Data.Form.Result (fromEither)
+import Data.Form (Form, FormF, FormV, formEmpty, formEmptyF)
+import Data.Identity (Identity)
 import Data.Maybe (Maybe(..))
+import Data.Newtype (unwrap)
 import Data.Number as Number
 import Data.String (null, trim)
-import Data.String.NonEmpty as NES
-import Data.String.NonEmpty.Internal (NonEmptyString)
 import Data.Traversable (traverse)
-import Data.Tuple.Nested (type (/\), (/\))
 import Text.Parsing.Parser (ParseError, Parser, runParser)
 import Text.Parsing.Parser.String (eof)
 
@@ -39,42 +20,43 @@ import Text.Parsing.Parser.String (eof)
 -- Model
 -------------------------------------------------------------------------------
 
-type TextForm = Form (String /\ String)
-type StringForm e = TextForm e String
-type StringFormRequired e = TextFormRequired e NonEmptyString
-type TextFormOptional e a = TextForm e (Maybe a)
-type TextFormRequired e a = TextForm (Maybe e) a
-type NumberFormOptional = TextFormOptional Unit Number
-type NumberFormRequired = TextFormRequired Unit Number
-type ParsedFormOptional a = TextFormOptional ParseError a
-type ParsedForm a = TextForm ParseError a
+data NaN = NaN
+
+type TextForm = Form (Identity String)
+type TextFormF f a = FormF f (Identity String) a
+type TextFormV e a = FormV e (Identity String) a
 
 -------------------------------------------------------------------------------
 -- Constructors
 -------------------------------------------------------------------------------
 
-textValidate :: forall e a. (String -> Either e a) -> TextForm e a
-textValidate f = formValidate ("" /\ "") $ fromEither <<< f <<< current
+string :: TextForm String
+string = formEmpty unwrap
 
-text :: forall e. StringForm e
-text = textValidate Right
+text :: forall a. (String -> a) -> TextForm a
+text = formEmpty <<< composeFlipped unwrap
 
-textOptional :: forall e a. (String -> Either e a) -> TextFormOptional e a
-textOptional f = textValidate $ traverse f <<< filter (not null) <<< Just <<<
-  trim
+textF :: forall f a. (String -> f a) -> TextFormF f a
+textF = formEmptyF <<< composeFlipped unwrap
 
-textParsedOptional :: forall a. Parser String a -> ParsedFormOptional a
-textParsedOptional parser =
-  textValidate $ flip runParser $ (Nothing <$ eof) <|> (Just <$> parser)
+textV :: forall e a. (String -> Either e a) -> TextFormV e a
+textV = textF
 
-textParsed :: forall a. Parser String a -> ParsedForm a
-textParsed = textValidate <<< flip runParser
+textNonEmpty :: forall a. (String -> a) -> TextForm (Maybe a)
+textNonEmpty f = text $ map f <<< filter (not null) <<< Just <<< trim
 
-textRequired :: forall e. StringFormRequired e
-textRequired = required $ textValidate (Right <<< NES.fromString)
+textNonEmptyF
+  :: forall f a. Applicative f => (String -> f a) -> TextFormF f (Maybe a)
+textNonEmptyF f = textF $ traverse f <<< filter (not null) <<< Just <<< trim
 
-numberOptional :: NumberFormOptional
-numberOptional = textOptional $ note unit <<< Number.fromString
+textNonEmptyV :: forall e a. (String -> Either e a) -> TextFormV e (Maybe a)
+textNonEmptyV = textNonEmptyF
 
-numberRequired :: NumberFormRequired
-numberRequired = required numberOptional
+number :: TextFormV NaN (Maybe Number)
+number = textNonEmptyV $ note NaN <<< Number.fromString
+
+parsed :: forall a. Parser String a -> TextFormV ParseError a
+parsed parser = textV $ flip runParser parser
+
+parsedNonEmpty :: forall a. Parser String a -> TextFormV ParseError (Maybe a)
+parsedNonEmpty parser = parsed $ (Nothing <$ eof) <|> (Just <$> parser)
