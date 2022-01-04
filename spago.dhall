@@ -1,4 +1,4 @@
-{ name = "forms"
+{ name = "digest"
 , dependencies =
   [ "aff"
   , "bifunctors"

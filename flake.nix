@@ -1,5 +1,5 @@
 {
-  description = "Compositional, declaritive forms for PureScript";
+  description = "Digestive workflows for PureScript";
 
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
@@ -80,9 +80,9 @@
           };
         };
 
-        forms =
+        digest =
           pkgs.stdenv.mkDerivation {
-            name = "forms";
+            name = "digest";
             buildInputs = [
               spagoPkgs.installSpagoStyle
             ];
@@ -143,12 +143,12 @@
       in
       {
         packages = {
-          inherit forms purs-tidy-hook fix-purs-tidy prettier-hook fix-prettier;
+          inherit digest purs-tidy-hook fix-purs-tidy prettier-hook fix-prettier;
         };
         hydraJobs = {
-          inherit forms pre-commit-check;
+          inherit digest pre-commit-check;
         };
-        defaultPackage = forms;
+        defaultPackage = digest;
         devShell = pkgs.mkShell {
           buildInputs = [
             clean
